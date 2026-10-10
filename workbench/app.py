@@ -18,6 +18,7 @@ WEB=Path(getattr(sys,'_MEIPASS',Path(__file__).parent))/'web'
 LIBRARY_POLICY=json.loads((RESOURCES/'library_policy.json').read_text(encoding='utf-8'))
 ID=re.compile(r'^[a-f0-9]{32}$')
 METADATA=['site','client','report_number','project_number','revision','report_date','prepared_by','reviewed_by','purpose','issued_to','document_name','author_qualifications','reviewer_qualifications','author_title','reviewer_title']
+PERSON_REFERENCES=['prepared_by_id','reviewed_by_id']
 RATINGS=['element','condition_rating','likelihood','severity','priority']
 
 def atomic_json(path,value):
@@ -94,6 +95,37 @@ class Store:
         self.options=json.loads((RESOURCES/'options.json').read_text(encoding='utf-8'))
         self.catalog_path=self.path/'photos.json'
         self.catalog=json.loads(self.catalog_path.read_text(encoding='utf-8')) if self.catalog_path.exists() else {}
+        self.personnel_path=self.path/'personnel.json'
+        if not self.personnel_path.exists():shutil.copyfile(RESOURCES/'personnel.json',self.personnel_path)
+        self.personnel=json.loads(self.personnel_path.read_text(encoding='utf-8'))
+
+    def save_personnel(self,value):
+        with self.lock:
+            if not isinstance(value,dict) or not isinstance(value.get('people'),list) or len(value['people'])>200:
+                raise ValueError('人员库格式不正确，最多 200 人')
+            if type(value.get('revision')) is not int or value['revision']!=self.personnel['revision']:
+                raise ValueError('人员库已在其他页面更新，请关闭后重新打开人员库')
+            people=[];ids=set();names=set()
+            for person in value['people']:
+                if not isinstance(person,dict):raise ValueError('人员资料格式不正确')
+                pid=identifier(person.get('id'))
+                if pid in ids:raise ValueError('人员编号重复')
+                fields={}
+                for key in ['name','qualifications','title']:
+                    text=person.get(key,'')
+                    if not isinstance(text,str) or len(text)>500:raise ValueError('人员姓名、资质和职位最多 500 字符')
+                    fields[key]=text.strip()
+                if not fields['name']:raise ValueError('请填写姓名')
+                if fields['name'].casefold() in names:raise ValueError('姓名重复，请编辑已有人员或填写可区分的姓名')
+                roles=person.get('roles')
+                if not isinstance(roles,list) or not roles or any(r not in ['author','reviewer'] for r in roles):
+                    raise ValueError('请选择作者或审阅者角色')
+                ids.add(pid);names.add(fields['name'].casefold())
+                people.append({'id':pid,**fields,'roles':sorted(set(roles))})
+            saved={'revision':value['revision']+1,'people':people}
+            shutil.copyfile(self.personnel_path,self.path/'backups/personnel.previous.json')
+            atomic_json(self.personnel_path,saved);self.personnel=saved
+            return saved
 
     def path_for_project(self,pid):return self.path/'projects'/(identifier(pid)+'.json')
     def load(self,pid):
@@ -120,6 +152,8 @@ class Store:
         for key in METADATA:
             value=p['metadata'].get(key,'')
             if not isinstance(value,str) or len(value)>500:raise ValueError('报告信息过长')
+        for key in PERSON_REFERENCES:
+            if p['metadata'].get(key):identifier(p['metadata'][key])
         date.fromisoformat(p['metadata']['report_date'])
         itemids=set()
         for item in [*p['items'],p.get('editor',{})]:
@@ -254,7 +288,8 @@ class Handler(BaseHTTPRequestHandler):
         if not self.authorized():self.reply({'error':'请从程序启动的页面打开工作台'},403);return
         try:
             s=self.server.store
-            if url.path=='/api/bootstrap':self.reply({'library':s.library,'options':s.options,'projects':s.list(),'data_folder':str(s.path),'version':__version__});return
+            if url.path=='/api/bootstrap':self.reply({'library':s.library,'options':s.options,'personnel':s.personnel,'projects':s.list(),'data_folder':str(s.path),'version':__version__});return
+            if url.path=='/api/personnel':self.reply(s.personnel);return
             if url.path=='/api/project':self.reply(s.load(query['id'][0]));return
             if url.path.startswith('/photos/'):
                 pid=url.path.split('/')[-1].removesuffix('.jpg');self.send_bytes(s.photo_path(pid).read_bytes(),'image/jpeg');return
@@ -284,6 +319,7 @@ class Handler(BaseHTTPRequestHandler):
             if length>limit:raise ValueError('文件过大')
             content=self.rfile.read(length);s=self.server.store
             if path=='/api/new':self.reply(s.new());return
+            if path=='/api/personnel':self.reply(s.save_personnel(json.loads(content)));return
             if path=='/api/photo':self.reply(s.upload(content,unquote(self.headers.get('X-Filename','photo.jpg'))));return
             if path=='/api/rotate':self.reply(s.rotate(json.loads(content)['id']));return
             if path=='/api/save':self.reply(s.save(json.loads(content)));return

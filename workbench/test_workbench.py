@@ -63,6 +63,38 @@ class WorkbenchTests(unittest.TestCase):
         self.assertEqual(reopened.library,custom)
         self.assertEqual((reopened.path/'library.xlsx').read_bytes(),workbook)
 
+    def test_personnel_edit_persist_conflict_and_report_snapshot(self):
+        personnel=json.loads(json.dumps(self.store.personnel));old=json.loads(json.dumps(personnel))
+        person=personnel['people'][0]
+        person.update(name='Test Engineer',qualifications='BE, CPEng',title='Structural Engineer',roles=['author','reviewer'])
+        saved=self.store.save_personnel(personnel)
+        self.assertEqual(Store(self.store.path).personnel,saved)
+        with self.assertRaises(ValueError):self.store.save_personnel(old)
+        self.project['metadata'].update(prepared_by=person['name'],prepared_by_id=person['id'],author_qualifications=person['qualifications'],author_title=person['title'],
+                                        reviewed_by=person['name'],reviewed_by_id=person['id'],reviewer_qualifications=person['qualifications'],reviewer_title=person['title'],
+                                        site='Personnel Test',report_number='TEST-PEOPLE',project_number='TEST')
+        self.project['items']=[self.item([self.store.upload(image_bytes(),'test.jpg')])];self.store.save(self.project)
+        edited=json.loads(json.dumps(saved));edited['people'][0]['name']='Renamed Engineer';self.store.save_personnel(edited)
+        self.assertEqual(self.store.load(self.project['id'])['metadata'],self.project['metadata'])
+        exported=self.store.export(self.project['id'])
+        with zipfile.ZipFile(self.store.path/'exports'/(exported['id']+'.docx')) as package:
+            text=''.join(E.fromstring(package.read('word/document.xml')).xpath('.//w:t/text()',namespaces=NS))
+            for value in ['Test Engineer','BE, CPEng','Structural Engineer']:self.assertIn(value,text)
+        empty={'revision':self.store.personnel['revision'],'people':[]};self.store.save_personnel(empty)
+        self.assertEqual(Store(self.store.path).personnel['people'],[])
+        restored=self.store.restore(self.store.backup(self.project['id']))
+        self.assertEqual(restored['metadata'],self.project['metadata'])
+
+    def test_personnel_invalid_input_does_not_change_saved_library(self):
+        original=json.loads(json.dumps(self.store.personnel))
+        variants=[]
+        for patch_values in [{'name':'  '},{'title':'x'*501},{'roles':[]},{'roles':['invalid']},{'id':'../other'}]:
+            value=json.loads(json.dumps(original));value['people'][0].update(patch_values);variants.append(value)
+        duplicate=json.loads(json.dumps(original));duplicate['people'][1]['name']=duplicate['people'][0]['name'];variants.append(duplicate)
+        for value in variants:
+            with self.assertRaises(ValueError):self.store.save_personnel(value)
+        self.assertEqual(Store(self.store.path).personnel,original)
+
     def test_photos_heic_exif_rotate_original_preserved(self):
         jpg=image_bytes();photo=self.store.upload(jpg,'phone.jpg');original=self.store.path/'originals'/(photo['id']+'.jpg')
         self.assertEqual(original.read_bytes(),jpg)

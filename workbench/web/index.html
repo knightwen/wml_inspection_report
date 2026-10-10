@@ -4,7 +4,7 @@
 <header class="topbar"><div class="brand"><span class="brand-mark">W</span><div><strong>Inspection Workbench</strong><small>照片、现场记录与 Word 报告</small></div><span class="local"><i></i> 本地运行</span></div><div class="top-actions"><span id="saveStatus" role="status">正在打开…</span><button id="libraryButton" class="quiet">文字库</button><button id="exitButton" class="quiet">退出程序</button></div></header>
 <main>
 <section class="project-bar"><div><span class="eyebrow">REPORT WORKSPACE</span><h1 id="projectTitle">新的检查报告</h1><p id="projectSubtitle">先填写报告信息，再整理现场照片。</p></div><div class="project-actions"><label class="sr-only" for="projectSelect">选择草稿</label><select id="projectSelect"><option>打开草稿</option></select><button id="newProject">＋ 新建报告</button><button id="backupButton" title="备份包含照片和全部草稿文字">备份草稿</button><button id="restoreButton">导入草稿</button><input id="restoreFile" type="file" accept=".zip" hidden></div></section>
-<details id="reportDetails" class="panel report-details" open><summary><span><b>01</b> 报告信息 <small>填写封面与文档信息页</small></span><span class="summary-hint">展开 / 收起</span></summary><div id="metadataFields" class="metadata-grid"></div><p class="form-note">其余正文保留空白模板。作者和审阅人的资质、职务可留空，之后在 Word 中填写。</p></details>
+<details id="reportDetails" class="panel report-details" open><summary><span><b>01</b> 报告信息 <small>填写封面与文档信息页</small></span><span class="summary-hint">展开 / 收起</span></summary><div class="personnel-tools"><p>从人员库选择作者和审阅者，自动填写资质与职位。当前报告可单独调整。</p><button id="managePersonnel">管理人员库</button></div><div id="metadataFields" class="metadata-grid"></div><p class="form-note">人员库修改后，重新选择人员可更新当前报告。其余正文保留空白模板。</p></details>
 <section class="panel editor-panel"><div class="section-heading"><div><span class="step">02</span><h2 id="editorTitle">整理一个检查项</h2><span id="editingBadge" class="editing-badge" hidden>编辑已保存检查项</span></div><button id="resetEditor" class="quiet">清空当前项</button></div>
 <div class="rating-grid" id="ratingFields"></div>
 <div class="editor-grid">
@@ -17,5 +17,20 @@
 </main>
 <dialog id="libraryDialog"><div class="dialog-header"><h2>常用措辞库</h2><button id="closeLibrary" aria-label="关闭文字库窗口">×</button></div><p>内置库仅收录历史报告出现至少 2 次的措辞，按历史频次排序。选择后请按现场情况编辑位置、构件编号和章节引用。</p><div id="libraryStats" class="library-stats"></div><p>在 Excel 中编辑黄色列，用“启用”决定是否显示；保存后导入更新。已保存检查项的文字保持原样。</p><div class="dialog-actions"><a href="/api/library-file" class="button" download>下载当前 Excel</a><button id="importLibraryButton" class="primary">导入编辑后的 Excel</button><input id="libraryFile" type="file" accept=".xlsx" hidden></div></dialog>
 <dialog id="confirmDialog"><h2 id="confirmTitle">确认操作</h2><p id="confirmText"></p><div class="dialog-actions"><button id="confirmCancel">取消</button><button id="confirmOk" class="primary">确认</button></div></dialog>
+<dialog id="personnelDialog" class="personnel-dialog" aria-labelledby="personnelDialogTitle">
+ <div class="dialog-header"><h2 id="personnelDialogTitle">人员库</h2><button id="closePersonnel" type="button" aria-label="关闭人员库">×</button></div>
+ <p>同一人可同时担任作者和审阅者。新增或修改后点击保存，后续报告即可选择。</p>
+ <div class="personnel-layout">
+  <aside><button id="newPersonnel" type="button" class="personnel-add">＋ 新增人员</button><div id="personnelList" class="personnel-list"></div></aside>
+  <form id="personnelForm" class="personnel-form">
+   <h3 id="personnelEditorTitle">编辑人员</h3>
+   <label for="personnel_name">姓名 *</label><input id="personnel_name" maxlength="500" required placeholder="如 Alex Chen">
+   <label for="personnel_qualifications">资质 / Qualifications</label><input id="personnel_qualifications" maxlength="500" placeholder="填写实际资质，可留空">
+   <label for="personnel_title">职位 / Title</label><input id="personnel_title" maxlength="500" placeholder="填写职位，可留空">
+   <fieldset class="personnel-roles"><legend>适用角色</legend><label><input id="personnel_author" type="checkbox">作者</label><label><input id="personnel_reviewer" type="checkbox">审阅者</label></fieldset>
+   <div class="dialog-actions"><button id="deletePersonnel" type="button" class="personnel-delete">删除人员</button><button id="savePersonnel" type="submit" class="primary">保存修改</button></div>
+  </form>
+ </div>
+</dialog>
 <div id="toast" role="status" hidden></div>
 <script src="/app.js" defer></script></body></html>

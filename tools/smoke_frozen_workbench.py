@@ -46,8 +46,14 @@ def exercise(executable, folder, fixtures, qa):
     assert b'<!doctype html' in request('/',raw=True).lower()
     for asset in ('/app.js','/style.css','/favicon.svg'):
         assert request(asset,raw=True)
+    personnel=request('/api/personnel');assert len(personnel['people'])==2
+    personnel['people'][0].update(name='Frozen Test Author',qualifications='Test Qualification',title='Test Author Title',roles=['author','reviewer'])
+    personnel=request('/api/personnel',personnel)
+    assert request('/api/personnel')==personnel
     p=request('/api/new',{})
     p['metadata'].update(site='Frozen EXE Test',project_number='TEST',report_number='TEST-SIR-EXE',prepared_by='Test Author',reviewed_by='Test Reviewer')
+    person=personnel['people'][0]
+    p['metadata'].update(prepared_by=person['name'],prepared_by_id=person['id'],author_qualifications=person['qualifications'],author_title=person['title'])
     photos=[]
     for name in ['landscape.jpg','portrait.heic']:
         fixture=fixtures/name
@@ -63,6 +69,7 @@ def exercise(executable, folder, fixtures, qa):
     with zipfile.ZipFile(BytesIO(report)) as z:
         document=z.read('word/document.xml').decode()
         assert 'Frozen EXE Test' in document and item['observation'] in document
+        assert all(value in document for value in ['Frozen Test Author','Test Qualification','Test Author Title'])
         assert '{{' not in document and '1/19 Dempster' not in document
         assert len([n for n in z.namelist() if n.startswith('word/media/inspection-')])==2
         from lxml import etree
@@ -91,7 +98,7 @@ def exercise(executable, folder, fixtures, qa):
     return {'status': 'passed', 'version': VERSION, 'report_bytes': len(report),
             'checks': ['ZIP extraction', 'standalone startup and web assets', 'portable data folder',
                        'HEIC/JPG import', 'rotation and originals', 'save/reopen', 'DOCX export',
-                       'backup/restore', 'Excel library', 'loopback authentication', 'shutdown']}
+                       'backup/restore', 'Excel library', 'editable personnel and DOCX metadata', 'loopback authentication', 'shutdown']}
 
 
 def main():

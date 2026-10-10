@@ -3,7 +3,9 @@ const $=id=>document.getElementById(id);
 const fields=['element','condition_rating','likelihood','severity','priority'];
 const labels={element:'Element · 构件',condition_rating:'Condition Rating · 状况',likelihood:'Likelihood · 可能性',severity:'Severity · 严重程度',priority:'Priority · 优先级'};
 const metadataLabels={site:'地点 / 资产名称 *',client:'客户',report_number:'报告编号 *',project_number:'项目编号 *',revision:'Revision',report_date:'报告日期',prepared_by:'Prepared by',reviewed_by:'Reviewed by',purpose:'Purpose of issue',issued_to:'Issued to',document_name:'文档名称（留空自动生成）',author_qualifications:'作者资质',reviewer_qualifications:'审阅人资质',author_title:'作者职务',reviewer_title:'审阅人职务'};
+const personRoles={prepared_by:{role:'author',label:'作者 / Prepared by',prefix:'author'},reviewed_by:{role:'reviewer',label:'审阅者 / Reviewed by',prefix:'reviewer'}};
 let boot,project=null,busy=false,saveTimer,toastTimer,queue=Promise.resolve(),saveFailed=false;
+let personnelEditorId=null,personnelDirty=false;
 const blankEditor=()=>({photos:[],...Object.fromEntries([...fields,'observation','recommendation'].map(k=>[k,'']))});
 function node(tag,text,className){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(className)n.className=className;return n;}
 function toast(text){$('toast').textContent=text;$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,6500);}
@@ -27,7 +29,7 @@ function persist(){
  queue=task;return task;
 }
 async function flush(){clearTimeout(saveTimer);saveTimer=null;await persist();}
-function setBusy(value){busy=value;for(const id of ['newProject','projectSelect','saveItem','generateButton','backupButton','restoreButton','resetEditor','exitButton','libraryButton'])if($(id))$(id).disabled=value;if($('reportSummary'))updateSummary();}
+function setBusy(value){busy=value;for(const id of ['newProject','projectSelect','saveItem','generateButton','backupButton','restoreButton','resetEditor','exitButton','libraryButton','managePersonnel','savePersonnel','deletePersonnel','newPersonnel','closePersonnel'])if($(id))$(id).disabled=value;if($('reportSummary'))updateSummary();}
 function action(fn){return async event=>{if(busy)return;setBusy(true);try{await fn(event);}catch(e){toast(e.message);}finally{setBusy(false);}};}
 function confirmAction(title,text){
  $('confirmTitle').textContent=title;$('confirmText').textContent=text;const d=$('confirmDialog');d.showModal();
@@ -35,6 +37,7 @@ function confirmAction(title,text){
 }
 function buildFields(){
  for(const [key,label] of Object.entries(metadataLabels)){
+  if(personRoles[key]){buildPersonField(key);continue;}
   const box=node('label',label);const input=node('input');input.id='meta_'+key;input.type=key==='report_date'?'date':'text';input.maxLength=500;
   input.addEventListener('input',()=>{project.metadata[key]=input.value;updateTitle();scheduleSave();});box.append(input);$('metadataFields').append(box);
  }
@@ -55,6 +58,75 @@ function buildFields(){
   $(key+'Text').addEventListener('input',()=>{project.editor[key]=$(key+'Text').value;scheduleSave();});
  }
 }
+function buildPersonField(key){
+ const box=node('div',undefined,'person-field');const label=node('label',personRoles[key].label);label.htmlFor='meta_'+key;
+ const select=node('select');select.id='meta_'+key;
+ const manual=node('input');manual.id='manual_'+key;manual.maxLength=500;manual.placeholder='手动填写姓名';manual.setAttribute('aria-label',personRoles[key].label+'姓名');manual.hidden=true;
+ select.addEventListener('change',()=>{
+  if(select.value==='__manual__'){manual.hidden=false;project.metadata[key+'_id']='';manual.value=project.metadata[key]||'';manual.focus();}
+  else {
+   const person=boot.personnel.people.find(p=>p.id===select.value),prefix=personRoles[key].prefix;
+   project.metadata[key]=person?.name||'';project.metadata[key+'_id']=person?.id||'';
+   project.metadata[prefix+'_qualifications']=person?.qualifications||'';project.metadata[prefix+'_title']=person?.title||'';
+   $('meta_'+prefix+'_qualifications').value=project.metadata[prefix+'_qualifications'];$('meta_'+prefix+'_title').value=project.metadata[prefix+'_title'];manual.hidden=true;
+  }
+  scheduleSave();
+ });
+ manual.addEventListener('input',()=>{project.metadata[key]=manual.value;project.metadata[key+'_id']='';scheduleSave();});
+ box.append(label,select,manual);$('metadataFields').append(box);
+}
+function renderPersonChoices(){
+ if(!project)return;
+ for(const [key,spec] of Object.entries(personRoles)){
+  const select=$('meta_'+key);select.replaceChildren();
+  const empty=node('option','请选择'+(spec.role==='author'?'作者':'审阅者')+'…');empty.value='';select.append(empty);
+  const people=boot.personnel.people.filter(p=>p.roles.includes(spec.role));
+  for(const person of people){const option=node('option',person.name);option.value=person.id;select.append(option);}
+  const manual=node('option','手动填写姓名');manual.value='__manual__';select.append(manual);
+  const name=project.metadata[key]||'',ref=project.metadata[key+'_id'];
+  const selected=people.find(p=>p.name===name&&(!ref||p.id===ref));
+  select.value=selected?selected.id:name?'__manual__':'';
+  $('manual_'+key).hidden=select.value!=='__manual__';$('manual_'+key).value=name;
+ }
+}
+function loadPersonnelEditor(person=null){
+ personnelEditorId=person?.id||null;personnelDirty=false;
+ $('personnelEditorTitle').textContent=person?'编辑人员':'新增人员';
+ for(const key of ['name','qualifications','title'])$('personnel_'+key).value=person?.[key]||'';
+ $('personnel_author').checked=person?person.roles.includes('author'):true;
+ $('personnel_reviewer').checked=person?person.roles.includes('reviewer'):true;
+ $('deletePersonnel').hidden=!person;$('savePersonnel').textContent=person?'保存修改':'添加人员';
+ renderPersonnelList();
+}
+function renderPersonnelList(){
+ const list=$('personnelList');list.replaceChildren();
+ if(!boot.personnel.people.length)list.append(node('p','人员库为空，添加人员后即可在报告中选择。','personnel-empty'));
+ for(const person of boot.personnel.people){
+  const button=node('button',undefined,'personnel-card');button.type='button';button.classList.toggle('selected',person.id===personnelEditorId);
+  button.append(node('strong',person.name),node('small',person.title||'职位未填写'),node('small',person.roles.map(r=>r==='author'?'作者':'审阅者').join('、')));
+  button.onclick=action(async()=>{if(await discardPersonnelChanges())loadPersonnelEditor(person);});list.append(button);
+ }
+}
+async function discardPersonnelChanges(){return !personnelDirty||await confirmAction('放弃未保存的人员修改','人员资料尚未保存。是否放弃本次修改？');}
+async function openPersonnel(){
+ boot.personnel=await api('/api/personnel');renderPersonChoices();loadPersonnelEditor(boot.personnel.people[0]);$('personnelDialog').showModal();
+}
+async function savePersonnel(){
+ const person={id:personnelEditorId||crypto.randomUUID().replaceAll('-',''),roles:[]};
+ for(const key of ['name','qualifications','title'])person[key]=$('personnel_'+key).value.trim();
+ for(const role of ['author','reviewer'])if($('personnel_'+role).checked)person.roles.push(role);
+ if(!person.name)throw new Error('请填写姓名');if(!person.roles.length)throw new Error('请选择作者或审阅者角色');
+ const snapshot=structuredClone(boot.personnel),index=snapshot.people.findIndex(p=>p.id===person.id);
+ if(index>=0)snapshot.people[index]=person;else snapshot.people.push(person);
+ boot.personnel=await api('/api/personnel',snapshot);loadPersonnelEditor(boot.personnel.people.find(p=>p.id===person.id));renderPersonChoices();toast('人员资料已保存；重新选择人员可更新当前报告。');
+}
+async function deletePersonnel(){
+ const person=boot.personnel.people.find(p=>p.id===personnelEditorId);if(!person)return;
+ if(!(await confirmAction('删除人员',`从人员库删除 ${person.name}？已填写报告中的姓名、资质和职位会保留。`)))return;
+ const snapshot=structuredClone(boot.personnel);snapshot.people=snapshot.people.filter(p=>p.id!==person.id);
+ boot.personnel=await api('/api/personnel',snapshot);loadPersonnelEditor(boot.personnel.people[0]);renderPersonChoices();toast('人员已删除');
+}
+async function closePersonnel(){if(await discardPersonnelChanges())$('personnelDialog').close();}
 function renderLibrary(key){
  const select=$(key+'Select'),selected=select.value,search=$(key+'Search').value.toLowerCase().trim();select.replaceChildren();
  const first=node('option',search?'选择搜索结果…':'从文字库选择…');first.value='';select.append(first);
@@ -122,7 +194,7 @@ function renderItems(){
  });updateSummary();
 }
 function editorHasContent(){return project.editor.photos.length||project.editor.observation||project.editor.recommendation;}
-function loadProject(value){project=value;for(const key of Object.keys(metadataLabels))$('meta_'+key).value=project.metadata[key]||'';updateTitle();renderEditor();renderItems();renderProjects();status('已保存到本地');}
+function loadProject(value){project=value;for(const key of Object.keys(metadataLabels))if(!personRoles[key])$('meta_'+key).value=project.metadata[key]||'';renderPersonChoices();updateTitle();renderEditor();renderItems();renderProjects();status('已保存到本地');}
 async function uploadPhotos(files){
  if(!files.length)return;if(project.editor.photos.length+files.length>100)throw new Error('一个检查项最多 100 张照片');
  const failures=[];
@@ -150,6 +222,12 @@ async function saveItem(){
 async function init(){
  boot=await api('/api/bootstrap');buildFields();$('dataFolder').textContent='数据目录：'+boot.data_folder;
  $('appVersion').textContent='Version '+boot.version+' · 无需登录 · 离线使用';
+ $('managePersonnel').onclick=action(openPersonnel);
+ $('newPersonnel').onclick=action(async()=>{if(await discardPersonnelChanges())loadPersonnelEditor();});
+ const submitPersonnel=action(savePersonnel);$('personnelForm').onsubmit=e=>{e.preventDefault();submitPersonnel(e);};
+ $('deletePersonnel').onclick=action(deletePersonnel);$('closePersonnel').onclick=action(closePersonnel);
+ $('personnelDialog').oncancel=e=>{e.preventDefault();if(!busy)action(closePersonnel)(e);};
+ for(const key of ['name','qualifications','title','author','reviewer'])$('personnel_'+key).addEventListener('input',()=>{personnelDirty=true;});
  let last=localStorage.getItem('lastProject');let chosen=boot.projects.find(p=>p.id===last)||boot.projects[0];
  loadProject(chosen?await api('/api/project?id='+chosen.id):await api('/api/new',{}));localStorage.setItem('lastProject',project.id);
  $('saveItem').onclick=action(saveItem);

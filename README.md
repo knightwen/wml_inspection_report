@@ -1,6 +1,6 @@
 # WML Inspection Report Workbench
 
-本地检查报告工作台，当前版本 **0.1.2**。支持拖入多张现场照片、选择并编辑 Observation / Recommendation、保存检查项，并按 Word 模板生成 DOCX 报告。
+本地检查报告工作台，当前版本 **0.1.3**。支持拖入多张现场照片、选择并编辑 Observation / Recommendation、保存检查项，并按 Word 模板生成 DOCX 报告。
 
 ## 使用
 
@@ -8,7 +8,7 @@
 
 Windows 10/11 64 位便携程序：解压完整分发包，双击 `InspectionWorkbench.exe`，在自动打开的本地浏览器中操作。无需安装 Python、Word 或照片编解码器；查看和继续编辑 DOCX 可使用 Word。
 
-1. 填写报告信息和封面信息。
+1. 填写报告信息和封面信息，从人员库选择作者和审阅者，自动填写资质与职位。
 2. 拖入 JPG、PNG、WEBP、HEIC 或 HEIF；一个检查项可包含多张照片，可旋转和调整顺序。
 3. 填写 Element、Condition Rating、Likelihood、Severity 和 Priority。菜单允许手动编辑。
 4. 搜索并选择 Observation / Recommendation，再按现场情况编辑。
@@ -20,6 +20,10 @@ Windows 10/11 64 位便携程序：解压完整分发包，双击 `InspectionWor
 从 0.1.1 升级：未修改过的旧默认库会在启动时自动替换为常用库，已有草稿和检查项保留完整文字。用户自行编辑或导入的自定义库继续使用原内容；如需改用内置常用库，可从本仓库 `workbench/resources/word_library.xlsx` 下载并在工作台导入。
 
 程序旁的 `WorkbenchData` 保存草稿、照片和导出报告。目录不可写时改存到 `%LOCALAPPDATA%/WMLInspectionWorkbench`；页面显示实际位置。可导出/导入草稿 ZIP 在不同电脑间迁移。每个人使用独立数据，不需要账号。
+
+在 **01 报告信息 → 管理人员库** 中新增、编辑或删除人员，填写姓名、Qualifications（资质）和 Title（职位），并选择作者、审阅者或两个角色。初始库提供“示例作者（请编辑）”和“示例审阅者（请编辑）”，资质与职位留空，使用前请换成实际人员。人员库保存在数据目录的 `personnel.json`，重启和升级时继续保留。
+
+选择姓名后自动填入对应资料，当前报告仍可单独修改资质、职位或手动填写姓名。报告保存当时的人员信息；以后编辑或删除人员库中的条目不会改写既有报告。需要更新当前报告时重新选择人员。草稿 ZIP 包含报告中的人员资料；迁移整个可选人员库请同时复制数据目录中的 `personnel.json`。
 
 ## 开发运行
 
@@ -46,9 +50,9 @@ python -m venv .venv
 
 一个命令完成 EXE 构建、ZIP 打包和解压后运行验证。输出：
 
-- `outputs/workbench_v0.1.2/InspectionWorkbench.exe`
-- `outputs/InspectionWorkbench_v0.1.2_Windows_x64.zip`
-- `outputs/InspectionWorkbench_v0.1.2_Windows_x64.zip.sha256`
+- `outputs/workbench_v0.1.3/InspectionWorkbench.exe`
+- `outputs/InspectionWorkbench_v0.1.3_Windows_x64.zip`
+- `outputs/InspectionWorkbench_v0.1.3_Windows_x64.zip.sha256`
 
 ZIP 包含程序、使用说明、许可证、应用源码及 HEIC 组件对应源码，不包含个人草稿和现场照片。程序内含界面、Word 模板、文字库和 HEIC 解码器。首次打包需要联网下载第三方源码，后续复用 `.build/source-cache`，每次校验 SHA-256。运行程序无需联网。
 
@@ -67,11 +71,11 @@ ZIP 包含程序、使用说明、许可证、应用源码及 HEIC 组件对应�
 首次发布当前版本（先将本次修改提交并推送到远程分支）：
 
 ```powershell
-git tag v0.1.2
-git push origin v0.1.2
+git tag v0.1.3
+git push origin v0.1.3
 ```
 
-后续发布先修改 `workbench/version.py` 中的版本号，并更新 README 的版本及输出示例，再提交、推送对应标签，例如 `v0.1.3`。无需上传 `outputs/` 到 Git，也无需额外配置发布 Token；发布 job 使用 GitHub 提供的 `GITHUB_TOKEN`，仅该 job 请求 `contents: write`。仓库须允许 GitHub Actions 运行。
+后续发布先修改 `workbench/version.py` 中的版本号，并更新 README 的版本及输出示例，再提交、推送对应标签，例如 `v0.1.4`。无需上传 `outputs/` 到 Git，也无需额外配置发布 Token；发布 job 使用 GitHub 提供的 `GITHUB_TOKEN`，仅该 job 请求 `contents: write`。仓库须允许 GitHub Actions 运行。
 
 
 ## 验证
@@ -80,7 +84,7 @@ git push origin v0.1.2
 python workbench/test_workbench.py
 ```
 
-覆盖常用库与 Excel 一致性、旧默认库升级、自定义库保留、HEIC、EXIF 方向、原图保留、保存与备份、Word 模板和多照片导出。若本地存在历史原报告，测试会额外对比原模板；仅克隆此仓库时验证已保存模板和固定版式尺寸。
+覆盖人员库保存、校验与并发冲突、报告人员信息保留与 Word 导出、常用库与 Excel 一致性、旧默认库升级、自定义库保留、HEIC、EXIF 方向、原图保留、保存与备份、Word 模板和多照片导出。若本地存在历史原报告，测试会额外对比原模板；仅克隆此仓库时验证已保存模板和固定版式尺寸。
 
 0.1.1 修复正文分节边距和检查表宽度：正文左右约 17.5 / 15 mm，主要检查表约 172.4 mm；照片保留比例并按照片列宽显示。纸张、封面、字体和页脚沿用模板。文字和照片会影响分页。
 
