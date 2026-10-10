@@ -10,9 +10,9 @@ inventory=json.loads((root/'.build/qa/template_inventory.json').read_text(encodi
 assert hashlib.sha256(source.read_bytes()).hexdigest()==inventory['sha256']
 prepare_template(source,target/'report_template.docx')
 data=json.loads((root/'analysis/word_library_workbook_data.json').read_text(encoding='utf-8'))
-library={key:[{'id':r[0],'text':r[2],'elements':r[3],'frequency':r[4]} for r in rows if r[1]=='是'] for key,rows in data['library'].items()}
+library={key:[{'id':r[0],'text':r[2],'elements':r[3],'frequency':r[4]} for r in rows if r[1]=='是' and r[4]>=2] for key,rows in data['library'].items()}
 (target/'library.json').write_text(json.dumps(library,ensure_ascii=False),encoding='utf-8')
 # Keep all original menu variants until the user reviews their consolidation.
 shutil.copyfile(root/'analysis/dropdown_options.json',target/'options.json')
-shutil.copyfile(root/'outputs/word_library_20261010/报告文字库_精简初稿.xlsx',target/'word_library.xlsx')
+print('Rebuild the matching common Excel workbook with tools/build_common_word_library.mjs; do not copy the historical full workbook.')
 print(json.dumps({'library_counts':{k:len(v) for k,v in library.items()},'template_bytes':(target/'report_template.docx').stat().st_size}))

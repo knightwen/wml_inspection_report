@@ -149,6 +149,7 @@ async function saveItem(){
 }
 async function init(){
  boot=await api('/api/bootstrap');buildFields();$('dataFolder').textContent='数据目录：'+boot.data_folder;
+ $('appVersion').textContent='Version '+boot.version+' · 无需登录 · 离线使用';
  let last=localStorage.getItem('lastProject');let chosen=boot.projects.find(p=>p.id===last)||boot.projects[0];
  loadProject(chosen?await api('/api/project?id='+chosen.id):await api('/api/new',{}));localStorage.setItem('lastProject',project.id);
  $('saveItem').onclick=action(saveItem);

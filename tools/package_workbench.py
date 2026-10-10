@@ -84,7 +84,7 @@ def package():
             shutil.copyfile(ROOT / file, source / file)
         source_tools = source / 'tools'
         source_tools.mkdir()
-        for name in ('build_workbench.py', 'package_workbench.py', 'distribution.py', 'smoke_frozen_workbench.py', 'heic_sources.json'):
+        for name in ('build_workbench.py', 'package_workbench.py', 'distribution.py', 'smoke_frozen_workbench.py', 'heic_sources.json', 'build_common_word_library.mjs'):
             shutil.copyfile(ROOT / 'tools' / name, source_tools / name)
         shutil.copytree(stage / 'LICENSES', source / 'LICENSES')
         third = source / 'third_party'

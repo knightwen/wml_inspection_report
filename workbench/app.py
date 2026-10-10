@@ -15,6 +15,7 @@ pillow_heif.register_heif_opener()
 Image.MAX_IMAGE_PIXELS = 100_000_000
 RESOURCES=Path(getattr(sys,'_MEIPASS',Path(__file__).parent))/'resources'
 WEB=Path(getattr(sys,'_MEIPASS',Path(__file__).parent))/'web'
+LIBRARY_POLICY=json.loads((RESOURCES/'library_policy.json').read_text(encoding='utf-8'))
 ID=re.compile(r'^[a-f0-9]{32}$')
 METADATA=['site','client','report_number','project_number','revision','report_date','prepared_by','reviewed_by','purpose','issued_to','document_name','author_qualifications','reviewer_qualifications','author_title','reviewer_title']
 RATINGS=['element','condition_rating','likelihood','severity','priority']
@@ -29,8 +30,12 @@ def identifier(value):
     if not isinstance(value,str) or not ID.fullmatch(value):raise ValueError('Invalid identifier')
     return value
 
+def library_digest(library):
+    content=json.dumps(library,sort_keys=True,ensure_ascii=False,separators=(',',':')).encode()
+    return hashlib.sha256(content).hexdigest()
+
 def read_library_xlsx(content):
-    """Read only enabled wording rows. Never apply the pending review sheet."""
+    """Read enabled wording rows from the editable common library."""
     ns={'s':'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
     parser=E.XMLParser(resolve_entities=False,no_network=True)
     with zipfile.ZipFile(BytesIO(content)) as z:
@@ -80,6 +85,12 @@ class Store:
         self.library_path=self.path/'library.json'
         if not self.library_path.exists():shutil.copyfile(RESOURCES/'library.json',self.library_path)
         self.library=json.loads(self.library_path.read_text(encoding='utf-8'))
+        # Replace the untouched 0.1.1 preset on upgrade; custom imports/edits keep their wording.
+        if library_digest(self.library)==LIBRARY_POLICY['legacy_default_sha256']:
+            self.library=json.loads((RESOURCES/'library.json').read_text(encoding='utf-8'))
+            atomic_json(self.library_path,self.library)
+            if (self.path/'library.xlsx').exists():
+                shutil.copyfile(RESOURCES/'word_library.xlsx',self.path/'library.xlsx')
         self.options=json.loads((RESOURCES/'options.json').read_text(encoding='utf-8'))
         self.catalog_path=self.path/'photos.json'
         self.catalog=json.loads(self.catalog_path.read_text(encoding='utf-8')) if self.catalog_path.exists() else {}

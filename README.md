@@ -1,6 +1,6 @@
 # WML Inspection Report Workbench
 
-本地检查报告工作台，当前版本 **0.1.1**。支持拖入多张现场照片、选择并编辑 Observation / Recommendation、保存检查项，并按 Word 模板生成 DOCX 报告。
+本地检查报告工作台，当前版本 **0.1.2**。支持拖入多张现场照片、选择并编辑 Observation / Recommendation、保存检查项，并按 Word 模板生成 DOCX 报告。
 
 ## 使用
 
@@ -15,7 +15,9 @@ Windows 10/11 64 位便携程序：解压完整分发包，双击 `InspectionWor
 5. 点击 Save，将检查项保存到列表；支持重新编辑、删除和调整顺序。
 6. 点击 Generate，下载 Word 报告。当前编辑项必须先 Save。
 
-文字库包含 622 条 Observation 和 175 条 Recommendation，待确认的合并项保持独立。可在界面下载 Excel、修改后重新导入。Introduction、Recommended Remedial Works、Conclusion 和 Cost Estimate 保留空白供后续补充。Word 目录可能需要右键更新整个目录。
+内置常用措辞库仅保留历史报告出现至少 **2 次**的描述：**90 条 Observation、44 条 Recommendation**，按历史频次排列，保留原编号与文字。一次性描述已从内置 JSON 和 Excel 删除，Excel 只包含两个常用措辞工作表。低频或专项情况可手动输入；选用现有措辞时按当前现场修改位置、编号和章节引用。可在界面下载 Excel、修改后重新导入。Introduction、Recommended Remedial Works、Conclusion 和 Cost Estimate 保留空白供后续补充。Word 目录可能需要右键更新整个目录。
+
+从 0.1.1 升级：未修改过的旧默认库会在启动时自动替换为常用库，已有草稿和检查项保留完整文字。用户自行编辑或导入的自定义库继续使用原内容；如需改用内置常用库，可从本仓库 `workbench/resources/word_library.xlsx` 下载并在工作台导入。
 
 程序旁的 `WorkbenchData` 保存草稿、照片和导出报告。目录不可写时改存到 `%LOCALAPPDATA%/WMLInspectionWorkbench`；页面显示实际位置。可导出/导入草稿 ZIP 在不同电脑间迁移。每个人使用独立数据，不需要账号。
 
@@ -44,9 +46,9 @@ python -m venv .venv
 
 一个命令完成 EXE 构建、ZIP 打包和解压后运行验证。输出：
 
-- `outputs/workbench_v0.1.1/InspectionWorkbench.exe`
-- `outputs/InspectionWorkbench_v0.1.1_Windows_x64.zip`
-- `outputs/InspectionWorkbench_v0.1.1_Windows_x64.zip.sha256`
+- `outputs/workbench_v0.1.2/InspectionWorkbench.exe`
+- `outputs/InspectionWorkbench_v0.1.2_Windows_x64.zip`
+- `outputs/InspectionWorkbench_v0.1.2_Windows_x64.zip.sha256`
 
 ZIP 包含程序、使用说明、许可证、应用源码及 HEIC 组件对应源码，不包含个人草稿和现场照片。程序内含界面、Word 模板、文字库和 HEIC 解码器。首次打包需要联网下载第三方源码，后续复用 `.build/source-cache`，每次校验 SHA-256。运行程序无需联网。
 
@@ -65,11 +67,11 @@ ZIP 包含程序、使用说明、许可证、应用源码及 HEIC 组件对应�
 首次发布当前版本（先将本次修改提交并推送到远程分支）：
 
 ```powershell
-git tag v0.1.1
-git push origin v0.1.1
+git tag v0.1.2
+git push origin v0.1.2
 ```
 
-后续发布先修改 `workbench/version.py` 中的版本号，并更新 README 的版本及输出示例，再提交、推送对应标签，例如 `v0.1.2`。无需上传 `outputs/` 到 Git，也无需额外配置发布 Token；发布 job 使用 GitHub 提供的 `GITHUB_TOKEN`，仅该 job 请求 `contents: write`。仓库须允许 GitHub Actions 运行。
+后续发布先修改 `workbench/version.py` 中的版本号，并更新 README 的版本及输出示例，再提交、推送对应标签，例如 `v0.1.3`。无需上传 `outputs/` 到 Git，也无需额外配置发布 Token；发布 job 使用 GitHub 提供的 `GITHUB_TOKEN`，仅该 job 请求 `contents: write`。仓库须允许 GitHub Actions 运行。
 
 
 ## 验证
@@ -78,7 +80,7 @@ git push origin v0.1.1
 python workbench/test_workbench.py
 ```
 
-覆盖 HEIC、EXIF 方向、原图保留、保存与备份、Excel 文字库、Word 模板和多照片导出。若本地存在历史原报告，测试会额外对比原模板；仅克隆此仓库时验证已保存模板和固定版式尺寸。
+覆盖常用库与 Excel 一致性、旧默认库升级、自定义库保留、HEIC、EXIF 方向、原图保留、保存与备份、Word 模板和多照片导出。若本地存在历史原报告，测试会额外对比原模板；仅克隆此仓库时验证已保存模板和固定版式尺寸。
 
 0.1.1 修复正文分节边距和检查表宽度：正文左右约 17.5 / 15 mm，主要检查表约 172.4 mm；照片保留比例并按照片列宽显示。纸张、封面、字体和页脚沿用模板。文字和照片会影响分页。
 
@@ -87,7 +89,8 @@ python workbench/test_workbench.py
 - `workbench/app.py`：本地服务、照片和草稿管理。
 - `workbench/report_engine.py`：保留模板 OOXML 格式的 Word 报告生成。
 - `workbench/web/`：浏览器工作台界面。
-- `workbench/resources/`：运行所需模板、Excel 文字库和下拉选项。
+- `workbench/resources/`：运行所需模板、常用措辞 JSON / Excel、词库升级策略和下拉选项。
+- `tools/build_common_word_library.mjs`：从内置 JSON 重建两页常用措辞 Excel（开发工具，使用 `@oai/artifact-tool`）。
 - `tools/`：历史报告提取、文字库分析、版式检查和构建辅助脚本。部分脚本需要本地历史报告、分析数据或 QA 输出。
 
 Git 不包含历史报告全集、提取出的原报告全文、现场原图、个人草稿、构建缓存或生成报告。运行所需模板及文字库作为项目资源保留。

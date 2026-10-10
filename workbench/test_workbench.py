@@ -4,7 +4,8 @@ from pathlib import Path
 from PIL import Image
 import pillow_heif
 from lxml import etree as E
-from app import Store, RESOURCES, read_library_xlsx
+from unittest.mock import patch
+from app import Store, RESOURCES, read_library_xlsx, library_digest, LIBRARY_POLICY, atomic_json
 from report_engine import NS
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -27,13 +28,40 @@ class WorkbenchTests(unittest.TestCase):
                 'observation':'Minor corrosion at the lower section. Manual edit: C1 & C2 <test>.',
                 'recommendation':'Clean, wire brush and repaint.'}
 
-    def test_library_keeps_pending_variants(self):
+    def test_common_library_matches_excel_and_keeps_stable_ids(self):
         lib=read_library_xlsx((RESOURCES/'word_library.xlsx').read_bytes())
-        self.assertEqual([len(lib[k]) for k in ['observation','recommendation']],[622,175])
-        texts=[r['text'] for r in lib['observation']]
-        self.assertTrue(any('Discoloration' in t for t in texts))
-        self.assertTrue(any('Discolouration' in t for t in texts))
+        self.assertEqual([len(lib[k]) for k in ['observation','recommendation']],[90,44])
+        for rows in lib.values():
+            self.assertTrue(all(r['frequency']>=2 for r in rows))
+            self.assertEqual([r['frequency'] for r in rows],sorted([r['frequency'] for r in rows],reverse=True))
+        self.assertEqual(lib['observation'][0]['id'],'OBS-0001')
+        self.assertEqual(lib['recommendation'][0]['text'],'Clean, wire brush and repaint.')
         self.assertEqual(lib,self.store.library)
+
+    def test_old_preset_upgrades_without_changing_saved_item_text(self):
+        photo=self.store.upload(image_bytes(),'saved.jpg')
+        item=self.item([photo]);item['observation']='Unique wording retained in an existing report.'
+        item['observation_source']='OBS-0622';self.project['items']=[item]
+        self.store.save(self.project)
+        legacy={'observation':[{'id':'OBS-0622','text':'One-off historical wording','elements':'Columns','frequency':1}],
+                'recommendation':self.store.library['recommendation']}
+        atomic_json(self.store.library_path,legacy)
+        (self.store.path/'library.xlsx').write_bytes(b'old default workbook')
+        with patch.dict(LIBRARY_POLICY,{'legacy_default_sha256':library_digest(legacy)}):
+            upgraded=Store(self.store.path)
+        self.assertEqual([len(upgraded.library[k]) for k in ['observation','recommendation']],[90,44])
+        self.assertEqual((upgraded.path/'library.xlsx').read_bytes(),(RESOURCES/'word_library.xlsx').read_bytes())
+        self.assertEqual(upgraded.load(self.project['id'])['items'],self.project['items'])
+        self.assertEqual(Store(self.store.path).library,upgraded.library)
+
+    def test_custom_library_is_preserved_on_upgrade(self):
+        custom=json.loads(json.dumps(self.store.library))
+        custom['observation'][0]['text']='Custom team wording';custom['observation'][0]['frequency']=1
+        atomic_json(self.store.library_path,custom)
+        workbook=b'custom workbook';(self.store.path/'library.xlsx').write_bytes(workbook)
+        reopened=Store(self.store.path)
+        self.assertEqual(reopened.library,custom)
+        self.assertEqual((reopened.path/'library.xlsx').read_bytes(),workbook)
 
     def test_photos_heic_exif_rotate_original_preserved(self):
         jpg=image_bytes();photo=self.store.upload(jpg,'phone.jpg');original=self.store.path/'originals'/(photo['id']+'.jpg')

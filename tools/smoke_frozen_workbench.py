@@ -40,7 +40,7 @@ def exercise(executable, folder, fixtures, qa):
             data = response.read()
             return data if raw else json.loads(data)
 
-    boot=request('/api/bootstrap');assert len(boot['library']['observation'])==622 and len(boot['library']['recommendation'])==175
+    boot=request('/api/bootstrap');assert len(boot['library']['observation'])==90 and len(boot['library']['recommendation'])==44
     assert boot['version']==VERSION
     assert Path(boot['data_folder']) == folder
     assert b'<!doctype html' in request('/',raw=True).lower()
@@ -79,7 +79,7 @@ def exercise(executable, folder, fixtures, qa):
     restored=request('/api/restore',backup);assert restored['id']!=p['id'] and restored['items'][0]['observation']==item['observation']
     assert restored['items'][0]['photos'][0]['id']!=photos[0]['id']
     library=request('/api/library',(root/'workbench/resources/word_library.xlsx').read_bytes())['library']
-    assert len(library['observation'])==622 and len(library['recommendation'])==175
+    assert len(library['observation'])==90 and len(library['recommendation'])==44
     assert request('/api/project?id='+p['id'])['items'][0]['observation']==item['observation']
     before=len(request('/api/bootstrap')['projects'])
     for path,data,h in [('/api/bootstrap',None,{'Cookie':''}),('/api/new',b'', {'Origin':'https://example.invalid'}),('/api/new',b'', {'X-Workbench':''})]:

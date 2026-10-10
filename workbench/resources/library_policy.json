@@ -1,0 +1,9 @@
+{
+  "name": "Common wording",
+  "minimum_historical_frequency": 2,
+  "legacy_default_sha256": "b69afc82335507206a50375e630c609a9be869bb9cf4c130a81bbfd62dd5a364",
+  "counts": {
+    "observation": 90,
+    "recommendation": 44
+  }
+}
