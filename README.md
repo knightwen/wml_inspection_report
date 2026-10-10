@@ -4,6 +4,8 @@
 
 ## 使用
 
+从 [GitHub Releases](https://github.com/knightwen/wml_inspection_report/releases/latest) 下载 `InspectionWorkbench_v版本号_Windows_x64.zip`。请下载发布附件中的便携 ZIP；GitHub 自动生成的 `Source code (zip)` 只有源码。首次发布完成后此入口才会有下载包。
+
 Windows 10/11 64 位便携程序：解压完整分发包，双击 `InspectionWorkbench.exe`，在自动打开的本地浏览器中操作。无需安装 Python、Word 或照片编解码器；查看和继续编辑 DOCX 可使用 Word。
 
 1. 填写报告信息和封面信息。
@@ -30,15 +32,45 @@ python workbench/app.py
 
 自动打开浏览器，服务仅监听 `127.0.0.1`。可使用 `--no-browser`、`--port 8765`、`--data-dir .build/dev-data` 指定启动方式。页面右上角“退出程序”关闭服务。
 
-## 构建便携 EXE
+## 构建 Windows 便携 ZIP
+
+在干净 Windows 10/11 x64 环境安装 **64 位 Python 3.12**，在仓库根目录执行：
 
 ```powershell
-python tools/build_workbench.py
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install --only-binary=:all: -r requirements.txt
+.venv\Scripts\python.exe tools/package_workbench.py --build
 ```
 
-输出：`outputs/workbench_v0.1.1/InspectionWorkbench.exe`。构建会包含界面、Word 模板、文字库和 HEIC 解码器。
+一个命令完成 EXE 构建、ZIP 打包和解压后运行验证。输出：
 
-开发依赖只用于构建，最终用户不需要安装。分发完整便携包时保留第三方许可证及 HEIC 组件对应源码；`tools/package_workbench.py` 是当前本地工作环境使用的打包辅助脚本。
+- `outputs/workbench_v0.1.1/InspectionWorkbench.exe`
+- `outputs/InspectionWorkbench_v0.1.1_Windows_x64.zip`
+- `outputs/InspectionWorkbench_v0.1.1_Windows_x64.zip.sha256`
+
+ZIP 包含程序、使用说明、许可证、应用源码及 HEIC 组件对应源码，不包含个人草稿和现场照片。程序内含界面、Word 模板、文字库和 HEIC 解码器。首次打包需要联网下载第三方源码，后续复用 `.build/source-cache`，每次校验 SHA-256。运行程序无需联网。
+
+也可单独执行 `python tools/build_workbench.py` 构建 EXE，然后执行 `python tools/package_workbench.py` 打包，以及 `python tools/smoke_frozen_workbench.py` 验证当前版本 ZIP。以上命令需在已安装依赖的 Python 环境运行。
+
+开发依赖只用于构建，最终用户不需要安装。请分发完整 ZIP，并保留其中的许可证和源码。打包脚本使用当前 Python 环境，不依赖原开发电脑的目录。HEIC wheel 与 `tools/heic_sources.json` 中的实际组件版本和源码校验值必须匹配；升级依赖时需同步核对该文件。
+
+## GitHub 自动构建和发布
+
+`.github/workflows/windows-portable.yml` 在 Windows runner 上安装固定依赖、执行应用测试、构建便携包，并从 ZIP 解压启动真正的 EXE，验证照片导入、草稿保存、Word 导出、备份恢复和退出。测试在含中文及空格的临时目录运行，并移除 Python 环境变量及 PATH 中的开发环境路径。
+
+- 推送 `main`、`master` 或 `codex/**` 分支、提交 PR：构建并在 Actions 保存 `windows-portable-x64` 附件。
+- 手动运行 Actions 工作流：只生成下载附件，不发布 Release。工作流需先进入仓库默认分支，才会在默认分支显示手动运行按钮。
+- 推送 `v版本号` 标签：验证标签与 `workbench/version.py` 一致，通过全部检查后自动创建 GitHub Release，上传便携 ZIP 和 SHA-256。重跑时更新该版本的同名附件。
+
+首次发布当前版本（先将本次修改提交并推送到远程分支）：
+
+```powershell
+git tag v0.1.1
+git push origin v0.1.1
+```
+
+后续发布先修改 `workbench/version.py` 中的版本号，并更新 README 的版本及输出示例，再提交、推送对应标签，例如 `v0.1.2`。无需上传 `outputs/` 到 Git，也无需额外配置发布 Token；发布 job 使用 GitHub 提供的 `GITHUB_TOKEN`，仅该 job 请求 `contents: write`。仓库须允许 GitHub Actions 运行。
+
 
 ## 验证
 

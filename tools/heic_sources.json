@@ -1,0 +1,37 @@
+{
+  "pillow-heif": "1.8.0",
+  "runtime": {
+    "libheif": "1.23.4",
+    "HEIF": "x265 HEVC encoder (4.3+1-e9b8812)",
+    "AVIF": "",
+    "encoders": {
+      "x265": "x265 HEVC encoder (4.3+1-e9b8812)",
+      "mask": "mask"
+    },
+    "decoders": {
+      "libde265": "libde265 HEVC decoder, version 1.1.3"
+    }
+  },
+  "sources": [
+    {
+      "file": "libheif-1.23.4.tar.gz",
+      "url": "https://codeload.github.com/strukturag/libheif/tar.gz/refs/tags/v1.23.4",
+      "sha256": "ce7739356637b7371dcc0ae876027f6f692de9c9ace8cd0e9ed8d79a01ea61fe"
+    },
+    {
+      "file": "libde265-1.1.3.tar.gz",
+      "url": "https://codeload.github.com/strukturag/libde265/tar.gz/refs/tags/v1.1.3",
+      "sha256": "189baa08fd6d2dd34db099de411bd6b2e6bd5eb88e81236a3d0fa3826b9715c4"
+    },
+    {
+      "file": "x265-e9b8812.tar.gz",
+      "url": "https://codeload.github.com/Multicorewareinc/x265/tar.gz/e9b88125dc21393b3fd8d68e98083bdfb89778a8",
+      "sha256": "33000d9a74e382a1d4d3f56cc3ea9da139f425b56af33c06fadf0547034a2d1b"
+    },
+    {
+      "file": "pillow-heif-1.8.0.tar.gz",
+      "url": "https://codeload.github.com/bigcat88/pillow_heif/tar.gz/refs/tags/v1.8.0",
+      "sha256": "3a8f93b47d6506ad4007aff6462a066dc6a8cb3a4610f022d46815ce6df905ae"
+    }
+  ]
+}

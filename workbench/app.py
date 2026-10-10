@@ -9,6 +9,7 @@ from PIL import Image, ImageOps
 import pillow_heif
 from lxml import etree as E
 from report_engine import generate_report
+from version import __version__
 
 pillow_heif.register_heif_opener()
 Image.MAX_IMAGE_PIXELS = 100_000_000
@@ -242,7 +243,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self.authorized():self.reply({'error':'请从程序启动的页面打开工作台'},403);return
         try:
             s=self.server.store
-            if url.path=='/api/bootstrap':self.reply({'library':s.library,'options':s.options,'projects':s.list(),'data_folder':str(s.path),'version':'0.1.1'});return
+            if url.path=='/api/bootstrap':self.reply({'library':s.library,'options':s.options,'projects':s.list(),'data_folder':str(s.path),'version':__version__});return
             if url.path=='/api/project':self.reply(s.load(query['id'][0]));return
             if url.path.startswith('/photos/'):
                 pid=url.path.split('/')[-1].removesuffix('.jpg');self.send_bytes(s.photo_path(pid).read_bytes(),'image/jpeg');return
