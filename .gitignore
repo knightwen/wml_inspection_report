@@ -1,0 +1,16 @@
+.build/
+outputs/
+reference_reports/
+analysis/
+template/
+tools/node_modules/
+WorkbenchData/
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+~$*
+*.log
+__pycache__/
+*.pyc
