@@ -14,10 +14,10 @@ import urllib.request
 import zipfile
 from PIL import Image
 import pillow_heif
-from distribution import ARCHIVE, ROOT as root, VERSION
+from distribution import ROOT as root, VERSION, edition_paths
 
 
-def exercise(executable, folder, fixtures, qa):
+def exercise(executable, folder, fixtures, qa, edition):
     statepath = folder / 'running.json'
     deadline = time.monotonic() + 90
     while time.monotonic() < deadline:
@@ -42,9 +42,16 @@ def exercise(executable, folder, fixtures, qa):
 
     boot=request('/api/bootstrap');assert len(boot['library']['observation'])==90 and len(boot['library']['recommendation'])==44
     assert boot['version']==VERSION
+    assert boot['edition']==edition
     assert Path(boot['data_folder']) == folder
-    assert b'<!doctype html' in request('/',raw=True).lower()
-    for asset in ('/app.js','/style.css','/favicon.svg'):
+    page=request('/',raw=True).decode()
+    assert '<!doctype html' in page.lower()
+    if edition=='english':
+        import re
+        assert 'languageSelect' not in page and not re.search(r'[\u4e00-\u9fff]',page)
+        assert 'englishOnly: true' in request('/interface.js',raw=True).decode()
+    else:assert 'languageSelect' in page
+    for asset in ('/app.js','/style.css','/favicon.svg','/interface.js','/i18n.js','/translations-en.js'):
         assert request(asset,raw=True)
     personnel=request('/api/personnel');assert len(personnel['people'])==2
     personnel['people'][0].update(name='Frozen Test Author',qualifications='Test Qualification',title='Test Author Title',roles=['author','reviewer'])
@@ -117,13 +124,13 @@ def exercise(executable, folder, fixtures, qa):
     assert repeated.returncode==0 and request('/api/bootstrap')['version']==VERSION
 
     request('/api/shutdown', {})
-    return {'status': 'passed', 'version': VERSION, 'report_bytes': len(report),
+    return {'status': 'passed', 'version': VERSION, 'edition':edition, 'report_bytes': len(report),
             'checks': ['ZIP extraction', 'standalone startup and web assets', 'portable data folder',
                        'HEIC/JPG import', 'rotation/crop/annotation and originals', 'save/reopen', 'DOCX export',
                        'backup/restore', 'Excel library', 'personnel snapshot and manual clearing', 'loopback authentication', 'conflict/copy/recovery ZIP', 'no Word environment with DOCX export', 'repeated startup', 'shutdown']}
 
 
-def verify_readonly_fallback(executable,directory,environment):
+def verify_readonly_fallback(executable,directory,environment,edition):
     restricted=directory/'readonly-program';restricted.mkdir()
     test_exe=restricted/executable.name;shutil.copyfile(executable,test_exe)
     assert restricted.resolve().is_relative_to((root/'.build/qa').resolve())
@@ -136,7 +143,7 @@ def verify_readonly_fallback(executable,directory,environment):
         try:(restricted/'.write-probe').write_text('test');raise AssertionError('Read-only test did not block writes')
         except PermissionError:pass
         process=subprocess.Popen([str(test_exe),'--no-browser'],cwd=directory,env=test_env,creationflags=subprocess.CREATE_NO_WINDOW)
-        folder=profile/'WMLInspectionWorkbench';deadline=time.monotonic()+60
+        folder=profile/('WMLInspectionWorkbenchEnglish' if edition=='english' else 'WMLInspectionWorkbench');deadline=time.monotonic()+60
         while not (folder/'running.json').exists():
             if time.monotonic()>deadline:raise RuntimeError('Read-only fallback did not start')
             time.sleep(.2)
@@ -155,24 +162,29 @@ def verify_readonly_fallback(executable,directory,environment):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--zip', type=Path, default=ARCHIVE)
+    parser.add_argument('--zip', type=Path)
+    parser.add_argument('--edition',choices=['bilingual','english'],default='bilingual')
     args = parser.parse_args()
+    name,_,default_archive=edition_paths(args.edition)
+    args.zip=args.zip or default_archive
     qa = root / '.build/qa'
+    if args.edition=='english':qa=qa/'english'
     qa.mkdir(parents=True, exist_ok=True)
     # Test a fresh, Unicode directory with spaces, using the EXE's default data location.
     with tempfile.TemporaryDirectory(prefix='portable 验证 ', dir=qa) as temporary:
         directory = Path(temporary).resolve()
         with zipfile.ZipFile(args.zip) as archive:
-            for name in archive.namelist():
-                if not (directory / name).resolve().is_relative_to(directory):
+            for entry in archive.namelist():
+                if not (directory / entry).resolve().is_relative_to(directory):
                     raise RuntimeError('Archive contains an unsafe path')
             assert archive.testzip() is None
-            assert 'InspectionWorkbench/使用说明.txt' in archive.namelist()
-            assert 'InspectionWorkbench/source/tools/heic_sources.json' in archive.namelist()
-            assert any(name.startswith('InspectionWorkbench/LICENSES/') for name in archive.namelist())
-            assert not any('WorkbenchData' in name or '__pycache__' in name for name in archive.namelist())
+            assert name+('/README.txt' if args.edition=='english' else '/使用说明.txt') in archive.namelist()
+            assert name+'/source/tools/heic_sources.json' in archive.namelist()
+            assert any(entry.startswith(name+'/LICENSES/') for entry in archive.namelist())
+            assert not any('WorkbenchData' in entry or '__pycache__' in entry for entry in archive.namelist())
             archive.extractall(directory)
-        executable = directory / 'InspectionWorkbench/InspectionWorkbench.exe'
+        executable = directory / name / (name+'.exe')
+        folder=executable.parent/('WorkbenchDataEnglish' if args.edition=='english' else 'WorkbenchData')
         fixtures = directory / 'fixtures'
         fixtures.mkdir()
         pillow_heif.register_heif_opener()
@@ -184,10 +196,10 @@ def main():
         process = subprocess.Popen([str(executable), '--no-browser'], cwd=directory, env=environment,
                                    creationflags=subprocess.CREATE_NO_WINDOW)
         try:
-            result = exercise(executable, executable.parent / 'WorkbenchData', fixtures, qa)
+            result = exercise(executable, folder, fixtures, qa, args.edition)
             assert process.wait(timeout=15) == 0
         except Exception:
-            log = executable.parent / 'WorkbenchData/workbench.log'
+            log = folder/'workbench.log'
             if log.exists():
                 shutil.copyfile(log, qa / 'frozen-failure.log')
             raise
@@ -196,7 +208,7 @@ def main():
                 # PyInstaller onefile uses a child process; clean up the entire test tree.
                 subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'], capture_output=True)
                 process.wait(timeout=15)
-        verify_readonly_fallback(executable,directory,environment)
+        verify_readonly_fallback(executable,directory,environment,args.edition)
         result['checks'].append('real read-only program directory fallback')
         (qa / 'frozen-smoke-result.json').write_text(json.dumps(result, indent=2), encoding='utf-8')
         print(json.dumps(result))

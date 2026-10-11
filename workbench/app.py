@@ -12,11 +12,13 @@ from lxml import etree as E
 from report_engine import generate_report
 from version import __version__
 from preview import PreviewManager,word_capability
+from ratings import DEFAULT_RATING_OPTIONS
 
 pillow_heif.register_heif_opener()
 Image.MAX_IMAGE_PIXELS = 100_000_000
 RESOURCES=Path(getattr(sys,'_MEIPASS',Path(__file__).parent))/'resources'
 WEB=Path(getattr(sys,'_MEIPASS',Path(__file__).parent))/'web'
+UI_CONFIG=json.loads((RESOURCES/'ui_config.json').read_text(encoding='utf-8'))
 LIBRARY_POLICY=json.loads((RESOURCES/'library_policy.json').read_text(encoding='utf-8'))
 ID=re.compile(r'^[a-f0-9]{32}$')
 METADATA=['site','client','report_number','project_number','revision','report_date','prepared_by','reviewed_by','purpose','issued_to','document_name','author_qualifications','reviewer_qualifications','author_title','reviewer_title']
@@ -99,6 +101,7 @@ class Store:
             if (self.path/'library.xlsx').exists():
                 shutil.copyfile(RESOURCES/'word_library.xlsx',self.path/'library.xlsx')
         self.options=json.loads((RESOURCES/'options.json').read_text(encoding='utf-8'))
+        self.options.update(deepcopy(DEFAULT_RATING_OPTIONS))
         self.catalog_path=self.path/'photos.json'
         self.catalog=json.loads(self.catalog_path.read_text(encoding='utf-8')) if self.catalog_path.exists() else {}
         self.personnel_path=self.path/'personnel.json'
@@ -374,11 +377,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         url=urlparse(self.path);query=parse_qs(url.query)
         if url.path=='/' and query.get('key',[''])[0]==self.server.token and self.headers.get('Host')==f'127.0.0.1:{self.server.server_port}':
-            self.send_response(302);self.send_header('Set-Cookie',f'workbench={self.server.token}; HttpOnly; SameSite=Strict; Path=/');self.send_header('Location','/');self.end_headers();return
+            language=query.get('lang',[''])[0]
+            destination='/?lang='+language if language in ['en','zh'] else '/'
+            self.send_response(302);self.send_header('Set-Cookie',f'workbench={self.server.token}; HttpOnly; SameSite=Strict; Path=/');self.send_header('Location',destination);self.end_headers();return
         if not self.authorized():self.reply({'error':'请从程序启动的页面打开工作台'},403);return
         try:
             s=self.server.store
-            if url.path=='/api/bootstrap':self.reply({'library':s.library,'options':s.options,'personnel':s.personnel,'projects':s.list(),'data_folder':str(s.path),'version':__version__,'preview_capability':word_capability()});return
+            if url.path=='/api/bootstrap':self.reply({'library':s.library,'options':s.options,'personnel':s.personnel,'projects':s.list(),'data_folder':str(s.path),'version':__version__,'edition':UI_CONFIG['edition'],'preview_capability':word_capability()});return
             if url.path=='/api/preview-job':self.reply(s.previews.get(identifier(query['id'][0])));return
             if url.path=='/api/preview-capability':self.reply(word_capability());return
             if url.path=='/api/personnel':self.reply(s.personnel);return
@@ -399,7 +404,7 @@ class Handler(BaseHTTPRequestHandler):
                 source=s.path/'library.xlsx'
                 if not source.exists():source=RESOURCES/'word_library.xlsx'
                 self.send_bytes(source.read_bytes(),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',filename='word-library.xlsx');return
-            file={'/':'index.html','/app.js':'app.js','/draft-state.js':'draft-state.js','/style.css':'style.css','/favicon.svg':'favicon.svg'}.get(url.path)
+            file={'/':'index.html','/app.js':'app.js','/draft-state.js':'draft-state.js','/interface.js':'interface.js','/i18n.js':'i18n.js','/translations-en.js':'translations-en.js','/style.css':'style.css','/favicon.svg':'favicon.svg'}.get(url.path)
             if not file:self.reply({'error':'Not found'},404);return
             self.send_bytes((WEB/file).read_bytes(),mimetypes.guess_type(file)[0] or 'text/plain')
         except Exception as exc:
@@ -443,11 +448,12 @@ class Handler(BaseHTTPRequestHandler):
 
 def default_data_folder():
     base=Path(sys.executable).parent if getattr(sys,'frozen',False) else Path(__file__).resolve().parent
-    preferred=base/'WorkbenchData'
+    data_name='WorkbenchDataEnglish' if UI_CONFIG['edition']=='english' else 'WorkbenchData'
+    preferred=base/data_name
     try:
         preferred.mkdir(exist_ok=True);probe=preferred/'.write-test';probe.write_text('test');probe.unlink();return preferred
     except OSError:
-        return Path(os.environ.get('LOCALAPPDATA',Path.home()))/'WMLInspectionWorkbench'
+        return Path(os.environ.get('LOCALAPPDATA',Path.home()))/('WMLInspectionWorkbenchEnglish' if UI_CONFIG['edition']=='english' else 'WMLInspectionWorkbench')
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--data-dir');parser.add_argument('--port',type=int,default=0);parser.add_argument('--no-browser',action='store_true');args=parser.parse_args()
@@ -483,5 +489,6 @@ if __name__=='__main__':
         logging.exception('Startup failure')
         if getattr(sys,'frozen',False):
             import ctypes
-            ctypes.windll.user32.MessageBoxW(None,'工作台启动失败。请检查程序目录中的 WorkbenchData/workbench.log。','Inspection Workbench',16)
+            message='Workbench failed to start. Check WorkbenchDataEnglish/workbench.log next to the program.' if UI_CONFIG['edition']=='english' else '工作台启动失败。请检查程序目录中的 WorkbenchData/workbench.log。'
+            ctypes.windll.user32.MessageBoxW(None,message,'Inspection Workbench',16)
         else:raise

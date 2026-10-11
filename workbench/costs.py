@@ -1,6 +1,7 @@
 """Decimal money calculations shared by validation and Word export."""
 import re
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from ratings import PRIORITY_OPTIONS, LEGACY_COST_PRIORITIES
 
 FIELDS=['description','quantity','unit','rate','priority']
 def amount(row):
@@ -23,4 +24,4 @@ def validate_rows(rows):
                 if not number.is_finite() or number<0 or number>Decimal('1000000000'):raise ValueError('数量和单价须在 0 至 1000000000 之间')
                 if number.as_tuple().exponent < -6:raise ValueError('数量和单价最多六位小数')
                 row[key]=str(number)
-        if row['priority'] not in ['', 'Urgent','Critical','High','Moderate','Low']:raise ValueError('费用优先级不正确')
+        if row['priority'] not in ['', *PRIORITY_OPTIONS, *LEGACY_COST_PRIORITIES]:raise ValueError('费用优先级不正确')

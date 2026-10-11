@@ -1,20 +1,24 @@
 # WML Inspection Report Workbench
 
-本地检查报告工作台，当前版本 **0.1.3**。支持拖入多张现场照片、选择并编辑 Observation / Recommendation、保存检查项，并按 Word 模板生成 DOCX 报告。
+本地检查报告工作台，当前版本 **0.1.4**。支持拖入多张现场照片、选择并编辑 Observation / Recommendation、保存检查项，并按 Word 模板生成 DOCX 报告。
 
-当前工作区已完成第一阶段稳定性改进，并更新本地预览；版本号暂不变，尚未创建新标签或发布新版本。本地构建包仅用于验证。
+0.1.4 提供中英文切换版和独立纯英文版，同时发布为两个 Windows 便携 ZIP。纯英文版固定英文界面，配套英文示例人员、措辞库 Excel 说明和使用说明；中文版继续保留。
 
 后续工作与验收要求见 [改进计划](docs/IMPROVEMENT_PLAN.md)。开发分支更新与版本发布分开，发布新版本需另行确认。
 
 ## 使用
 
-从 [GitHub Releases](https://github.com/knightwen/wml_inspection_report/releases/latest) 下载 `InspectionWorkbench_v版本号_Windows_x64.zip`。请下载发布附件中的便携 ZIP；GitHub 自动生成的 `Source code (zip)` 只有源码。首次发布完成后此入口才会有下载包。
+界面同时提供中文和英文，使用页头语言菜单切换，选择会在本机浏览器记住。切换前会保存当前草稿；人员库或照片编辑窗口有未保存修改时，请先保存。两种界面使用同一份数据，报告正文、姓名及照片名称保留原文。也可使用 `/?lang=zh` 和 `/?lang=en` 打开指定界面。
+
+The interface is available in Chinese and English. Use the language menu in the header; your choice is remembered in this browser. Switching saves the current draft first. Both interfaces share the same data and preserve report text, names and photo captions as entered.
+
+从 [GitHub Releases](https://github.com/knightwen/wml_inspection_report/releases/latest) 下载 `InspectionWorkbench_v版本号_Windows_x64.zip`。请下载发布附件中的便携 ZIP；GitHub 自动生成的 `Source code (zip)` 只有源码。纯英文版下载 `InspectionWorkbenchEnglish_v版本号_Windows_x64.zip`，运行 `InspectionWorkbenchEnglish.exe`。英文使用说明见 [English guide](docs/README_EN.md)。
 
 Windows 10/11 64 位便携程序：解压完整分发包，双击 `InspectionWorkbench.exe`，在自动打开的本地浏览器中操作。编辑草稿和生成 DOCX 无需安装 Python、Word 或照片编解码器。逐页预览需要本机安装并激活 Microsoft Word；未检测到或转换失败时会说明原因，仍可生成 DOCX。
 
 1. 填写报告信息和封面信息，从人员库选择作者和审阅者，自动填写资质与职位。
 2. 拖入 JPG、PNG、WEBP、HEIC 或 HEIF；一个检查项可包含多张照片，可旋转和调整顺序。点击照片下方“编辑”，支持框选裁剪、画红圈、撤销及重置本次编辑。先“保存照片”，再点击 Save 保存检查项；Word 使用编辑后的照片，原始文件仍保留。照片名称可留空，填写后显示在 Word 照片下方。
-3. 填写 Element、Condition Rating、Likelihood、Severity 和 Priority。下拉菜单始终显示全部标准选项；选择“手动填写 / 补充描述”可输入自定义内容。Severity 和 Priority 仅提供基本等级。
+3. 填写 Element、Condition Rating、Likelihood、Severity 和 Priority。下拉菜单始终显示全部标准选项；选择“手动填写 / 补充描述”可输入自定义内容。标准等级由低到高：Likelihood 为 Unlikely / Possible / Likely；Severity 为 Negligible / Minor / Moderate / Severe；Priority 为 Low / Moderate / High / Urgent。既有草稿的历史选项保持不变。
 4. 搜索并选择 Observation / Recommendation，再按现场情况编辑。
 5. 点击 Save，将检查项保存到列表；支持重新编辑、删除，拖动序号旁的手柄调整顺序并自动保存，也可使用 ↑ / ↓。
 6. 在“报告章节”填写 Introduction、Recommended Remedial Works、Conclusion 和 Cost Estimate 说明，支持多段落、自动保存及手动保存。四个模块每行一个。费用说明填入原模板费用表上方；费用表支持增删行、Priority 下拉、Quantity × Rate 自动计算及总计，并写入 Word 原模板表格。数量或单价留空时仅显示已填写项小计。
@@ -28,7 +32,7 @@ Windows 10/11 64 位便携程序：解压完整分发包，双击 `InspectionWor
 
 从 0.1.1 升级：未修改过的旧默认库会在启动时自动替换为常用库，已有草稿和检查项保留完整文字。用户自行编辑或导入的自定义库继续使用原内容；如需改用内置常用库，可从本仓库 `workbench/resources/word_library.xlsx` 下载并在工作台导入。
 
-程序旁的 `WorkbenchData` 保存草稿、照片和导出报告。目录不可写时改存到 `%LOCALAPPDATA%/WMLInspectionWorkbench`；页面显示实际位置。可导出/导入草稿 ZIP 在不同电脑间迁移。每个人使用独立数据，不需要账号。
+中英文切换版程序旁的 `WorkbenchData` 保存草稿、照片和导出报告。纯英文版使用独立的 `WorkbenchDataEnglish`，目录不可写时回退到 `%LOCALAPPDATA%/WMLInspectionWorkbenchEnglish`，可以通过草稿备份导入迁移报告和照片。目录不可写时改存到 `%LOCALAPPDATA%/WMLInspectionWorkbench`；页面显示实际位置。可导出/导入草稿 ZIP 在不同电脑间迁移。每个人使用独立数据，不需要账号。
 
 在顶部 **人员库** 中新增、编辑或删除人员，填写姓名、Qualifications（资质）和 Title（职位），并选择作者、审阅者或两个角色。初始库提供“示例作者（请编辑）”和“示例审阅者（请编辑）”，资质与职位留空，使用前请换成实际人员。人员库保存在数据目录的 `personnel.json`，重启和升级时继续保留。
 
@@ -56,18 +60,22 @@ python workbench/app.py
 ```powershell
 python -m venv .venv
 .venv\Scripts\python.exe -m pip install --only-binary=:all: -r requirements.txt
-.venv\Scripts\python.exe tools/package_workbench.py --build
+.venv\Scripts\python.exe tools/package_workbench.py --build --edition bilingual
+.venv\Scripts\python.exe tools/package_workbench.py --build --edition english
 ```
 
-一个命令完成 EXE 构建、ZIP 打包和解压后运行验证。输出：
+每个命令分别完成该版本的 EXE 构建、ZIP 打包和解压后运行验证。输出：
 
-- `outputs/workbench_v0.1.3/InspectionWorkbench.exe`
-- `outputs/InspectionWorkbench_v0.1.3_Windows_x64.zip`
-- `outputs/InspectionWorkbench_v0.1.3_Windows_x64.zip.sha256`
+- `outputs/workbench_v0.1.4/InspectionWorkbench.exe`
+- `outputs/InspectionWorkbench_v0.1.4_Windows_x64.zip`
+- `outputs/InspectionWorkbench_v0.1.4_Windows_x64.zip.sha256`
+- `outputs/workbench_english_v0.1.4/InspectionWorkbenchEnglish.exe`
+- `outputs/InspectionWorkbenchEnglish_v0.1.4_Windows_x64.zip`
+- `outputs/InspectionWorkbenchEnglish_v0.1.4_Windows_x64.zip.sha256`
 
 ZIP 包含程序、使用说明、许可证、应用源码及 HEIC 组件对应源码，不包含个人草稿和现场照片。程序内含界面、Word 模板、文字库和 HEIC 解码器。首次打包需要联网下载第三方源码，后续复用 `.build/source-cache`，每次校验 SHA-256。运行程序无需联网。
 
-也可单独执行 `python tools/build_workbench.py` 构建 EXE，然后执行 `python tools/package_workbench.py` 打包，以及 `python tools/smoke_frozen_workbench.py` 验证当前版本 ZIP。以上命令需在已安装依赖的 Python 环境运行。
+构建、打包和解压测试均支持 `--edition bilingual` 或 `--edition english`。也可单独执行 `python tools/build_workbench.py` 构建 EXE，然后执行 `python tools/package_workbench.py` 打包，以及 `python tools/smoke_frozen_workbench.py` 验证当前版本 ZIP。以上命令需在已安装依赖的 Python 环境运行。
 
 开发依赖只用于构建，最终用户不需要安装。请分发完整 ZIP，并保留其中的许可证和源码。打包脚本使用当前 Python 环境，不依赖原开发电脑的目录。HEIC wheel 与 `tools/heic_sources.json` 中的实际组件版本和源码校验值必须匹配；升级依赖时需同步核对该文件。
 
@@ -75,29 +83,31 @@ ZIP 包含程序、使用说明、许可证、应用源码及 HEIC 组件对应�
 
 `.github/workflows/windows-portable.yml` 在 Windows runner 上安装固定依赖，执行应用测试、保存队列测试和浏览器回归，再构建便携包。测试从 ZIP 解压启动真正的 EXE，验证 HEIC 和照片编辑、保存冲突恢复、无 Word 场景下生成 DOCX、备份恢复、重复启动及只读程序目录的数据回退。测试在含中文及空格的临时目录运行，并移除 Python 环境变量及 PATH 中的开发环境路径。浏览器回归使用可控 Word 转换测试替身及真实 PDFium，真实 Microsoft Word 集成另在装有 Word 的本机验证。
 
-- 推送 `main`、`master` 或 `codex/**` 分支、提交 PR：构建并在 Actions 保存 `windows-portable-x64` 附件。
+- 推送 `main`、`master` 或 `codex/**` 分支、提交 PR：构建并在 Actions 分别保存 `windows-portable-bilingual-x64` 与 `windows-portable-english-x64` 附件。
 - 手动运行 Actions 工作流：只生成下载附件，不发布 Release。工作流需先进入仓库默认分支，才会在默认分支显示手动运行按钮。
-- 推送 `v版本号` 标签：验证标签与 `workbench/version.py` 一致，通过全部检查后自动创建 GitHub Release，上传便携 ZIP 和 SHA-256。重跑时更新该版本的同名附件。
+- 推送 `v版本号` 标签：验证标签与 `workbench/version.py` 一致，通过全部检查后自动创建 GitHub Release，上传两个便携 ZIP 及各自的 SHA-256。重跑时更新该版本的同名附件。
 
 首次发布当前版本（先将本次修改提交并推送到远程分支）：
 
 ```powershell
-git tag v0.1.3
-git push origin v0.1.3
+git tag v0.1.4
+git push origin v0.1.4
 ```
 
-后续发布先修改 `workbench/version.py` 中的版本号，并更新 README 的版本及输出示例，再提交、推送对应标签，例如 `v0.1.4`。无需上传 `outputs/` 到 Git，也无需额外配置发布 Token；发布 job 使用 GitHub 提供的 `GITHUB_TOKEN`，仅该 job 请求 `contents: write`。仓库须允许 GitHub Actions 运行。
+后续发布先修改 `workbench/version.py` 中的版本号，并更新 README 的版本及输出示例，并添加对应 `docs/RELEASE_NOTES_v版本号.md`，再提交、推送对应标签，例如 `v0.1.5`。无需上传 `outputs/` 到 Git，也无需额外配置发布 Token；发布 job 使用 GitHub 提供的 `GITHUB_TOKEN`，仅该 job 请求 `contents: write`。仓库须允许 GitHub Actions 运行。
 
 
 ## 验证
 
 ```powershell
 python workbench/test_workbench.py
+python tools/test_english_assets.py
+node tools/test_i18n.cjs
 node tools/test_draft_state.cjs
 powershell -File tools/validate_reports.ps1
 ```
 
-20 项应用测试覆盖人员库快照与手动姓名清理、草稿冲突副本及未保存 ZIP、后台预览快照与并行保存、无 Word 和转换失败、超时清理与进程身份检查，以及常用库、HEIC、原图、照片编辑、备份和多照片 Word 模板。若本地存在历史原报告，测试会额外对比原模板；仅克隆此仓库时验证已保存模板和固定版式尺寸。
+23 项应用测试覆盖人员库快照与手动姓名清理、草稿冲突副本及未保存 ZIP、后台预览快照与并行保存、无 Word 和转换失败、超时清理与进程身份检查，以及常用库、HEIC、原图、照片编辑、备份和多照片 Word 模板。若本地存在历史原报告，测试会额外对比原模板；仅克隆此仓库时验证已保存模板和固定版式尺寸。
 
 自动化浏览器回归需要开发用 Node.js 和 Playwright；最终用户不需要这些依赖。本机有 Edge 时执行：
 

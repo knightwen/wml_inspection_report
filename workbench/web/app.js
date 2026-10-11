@@ -1,29 +1,31 @@
 'use strict';
 const $=id=>document.getElementById(id);
+const t=(...args)=>WorkbenchI18n.t(...args);
+const photoCountText=(count,short=false)=>WorkbenchI18n.language==='en'?count+(count===1?' photo':' photos'):count+(short?' 张':' 张照片');
 const fields=['element','condition_rating','likelihood','severity','priority'];
-const sectionLabels={introduction:'Introduction · 项目介绍',remedial_works:'Recommended Remedial Works · 修复工程建议',conclusion:'Conclusion · 结论',cost_estimate:'Cost Estimate · 费用估算说明'};
-const labels={element:'Element · 构件',condition_rating:'Condition Rating · 状况',likelihood:'Likelihood · 可能性',severity:'Severity · 严重程度',priority:'Priority · 优先级'};
-const metadataLabels={site:'地点 / 资产名称 *',client:'客户',report_number:'报告编号 *',project_number:'项目编号 *',revision:'Revision',report_date:'报告日期',purpose:'Purpose of issue',issued_to:'Issued to',document_name:'文档名称（留空自动生成）',prepared_by:'Prepared by',reviewed_by:'Reviewed by'};
-const personRoles={prepared_by:{role:'author',label:'作者 / Prepared by',prefix:'author'},reviewed_by:{role:'reviewer',label:'审阅者 / Reviewed by',prefix:'reviewer'}};
+const sectionLabels={introduction:t('Introduction · 项目介绍'),remedial_works:t('Recommended Remedial Works · 修复工程建议'),conclusion:t('Conclusion · 结论'),cost_estimate:t('Cost Estimate · 费用估算说明')};
+const labels={element:t('Element · 构件'),condition_rating:t('Condition Rating · 状况'),likelihood:t('Likelihood · 发生可能性'),severity:t('Severity · 严重程度'),priority:t('Priority · 处理优先级')};
+const metadataLabels={site:t('地点 / 资产名称 *'),client:t('客户'),report_number:t('报告编号 *'),project_number:t('项目编号 *'),revision:'Revision',report_date:t('报告日期'),purpose:'Purpose of issue',issued_to:'Issued to',document_name:t('文档名称（留空自动生成）'),prepared_by:'Prepared by',reviewed_by:'Reviewed by'};
+const personRoles={prepared_by:{role:'author',label:t('作者 / Prepared by'),prefix:'author'},reviewed_by:{role:'reviewer',label:t('审阅者 / Reviewed by'),prefix:'reviewer'}};
 let boot,project=null,busy=false,toastTimer,saver,previewJob=null,previewTimer;
 let personnelEditorId=null,personnelDirty=false;
 let itemDrag=null;
 let photoEditor=null;
 const blankEditor=()=>({photos:[],...Object.fromEntries([...fields,'observation','recommendation'].map(k=>[k,'']))});
 function node(tag,text,className){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(className)n.className=className;return n;}
-function toast(text){$('toast').textContent=text;$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,6500);}
-function status(text,error=false){$('saveStatus').textContent=text;$('saveStatus').classList.toggle('error',error);}
+function toast(text){$('toast').textContent=t(text);$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,6500);}
+function status(text,error=false){$('saveStatus').textContent=t(text);$('saveStatus').classList.toggle('error',error);}
 async function api(path,body,headers={}){
  const opts={headers:{'X-Workbench':'1',...headers}};
  if(body!==undefined){opts.method='POST';if(body instanceof Blob){opts.body=body;}else{opts.headers['Content-Type']='application/json';opts.body=JSON.stringify(body);}}
- const r=await fetch(path,opts);const data=await r.json();if(!r.ok){const error=new Error(data.error||'操作失败');error.code=data.code;throw error;}return data;
+ const r=await fetch(path,opts);const data=await r.json();if(!r.ok){const error=new Error(t(data.error)||t('操作失败'));error.code=data.code;throw error;}return data;
 }
 function saveStatus(state){
- if(state.conflict)status('保存冲突：当前修改尚未保存，请保留副本',true);
- else if(state.sending)status('正在保存，请勿关闭页面…');
- else if(state.pending)status('等待保存，请勿关闭页面…');
- else if(state.error)status('保存失败，修改保留在当前页面',true);
- else if(state.changed>state.saved)status('有未保存更改…');else status('已保存到本地');
+ if(state.conflict)status(t('保存冲突：当前修改尚未保存，请保留副本'),true);
+ else if(state.sending)status(t('正在保存，请勿关闭页面…'));
+ else if(state.pending)status(t('等待保存，请勿关闭页面…'));
+ else if(state.error)status(t('保存失败，修改保留在当前页面'),true);
+ else if(state.changed>state.saved)status(t('有未保存更改…'));else status(t('已保存到本地'));
  $('retrySave').hidden=!state.error||!!state.conflict;$('resolveConflict').hidden=!state.conflict;
 }
 function scheduleSave(){saver.schedule();}
@@ -33,14 +35,14 @@ function openSaveConflict(){if(!$('saveConflictDialog').open)$('saveConflictDial
 async function recoverConflict(loadLatest=false){
  await saver.queue;const previousId=project.id;const copy=await api('/api/project-copy',structuredClone(project));
  boot.projects=(await api('/api/bootstrap')).projects;loadProject(loadLatest?await api('/api/project?id='+previousId):copy);
- localStorage.setItem('lastProject',project.id);$('saveConflictDialog').close();toast(loadLatest?'你的修改已保存为独立副本，已加载原草稿最新版本。':'你的修改已保存为独立副本。');
+ localStorage.setItem('lastProject',project.id);$('saveConflictDialog').close();toast(loadLatest?t('你的修改已保存为独立副本，已加载原草稿最新版本。'):t('你的修改已保存为独立副本。'));
 }
 async function downloadRecovery(){
  const response=await fetch('/api/recovery-backup',{method:'POST',headers:{'X-Workbench':'1','Content-Type':'application/json'},body:JSON.stringify(project)});
- if(!response.ok)throw new Error((await response.json()).error);
- const url=URL.createObjectURL(await response.blob()),a=node('a');a.href=url;a.download='unsaved-draft.inspection.zip';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('当前修改与照片已下载；完成冲突处理前，请保留当前页面。');
+ if(!response.ok)throw new Error(t((await response.json()).error));
+ const url=URL.createObjectURL(await response.blob()),a=node('a');a.href=url;a.download='unsaved-draft.inspection.zip';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast(t('当前修改与照片已下载；完成冲突处理前，请保留当前页面。'));
 }
-function setBusy(value){busy=value;for(const id of ['newProject','projectSelect','saveSections','saveItem','previewButton','generateButton','backupButton','restoreButton','resetEditor','exitButton','libraryButton','managePersonnel','savePersonnel','deletePersonnel','newPersonnel','closePersonnel'])if($(id))$(id).disabled=value;if($('reportSummary'))updateSummary();if(photoEditor)renderPhotoEditor();}
+function setBusy(value){busy=value;for(const id of ['newProject','projectSelect','saveSections','saveItem','previewButton','generateButton','backupButton','restoreButton','resetEditor','exitButton','libraryButton','managePersonnel','savePersonnel','deletePersonnel','newPersonnel','closePersonnel','languageSelect'])if($(id))$(id).disabled=value;if($('reportSummary'))updateSummary();if(photoEditor)renderPhotoEditor();}
 function action(fn){return async event=>{if(busy)return;setBusy(true);try{await fn(event);}catch(e){toast(e.message);}finally{setBusy(false);}};}
 function confirmAction(title,text){
  $('confirmTitle').textContent=title;$('confirmText').textContent=text;const d=$('confirmDialog');d.showModal();
@@ -49,8 +51,8 @@ function confirmAction(title,text){
 function buildFields(){
  for(const [key,label] of Object.entries(sectionLabels)){
   const box=node('label',label,'section-field'),input=node('textarea');input.id='section_'+key;input.maxLength=60000;input.rows=6;input.spellcheck=true;
-  input.placeholder=key==='cost_estimate'?'填写估算依据、排除项、预算说明或限制条件。':'输入正文；换行分段。留空则保留空白模板。';
-  input.addEventListener('input',()=>{project.sections[key]=input.value;scheduleSave();});box.append(input);if(key==='cost_estimate'){const wrapper=node('div',undefined,'cost-editor');wrapper.append(box);const scroll=node('div',undefined,'cost-table-scroll');scroll.innerHTML='<table class=cost-table><thead><tr><th>Item</th><th>Description</th><th>Quantity</th><th>Unit</th><th>Rate</th><th>Cost</th><th>Priority</th><th>操作</th></tr></thead><tbody id=costRows></tbody></table>';wrapper.append(scroll);const footer=node('div',undefined,'cost-footer');const add=node('button','＋ 新增费用项');add.id='addCostRow';add.type='button';add.onclick=()=>{project.cost_rows.push({description:'',quantity:'',unit:'',rate:'',priority:''});renderCosts();scheduleSave();};const total=node('strong');total.id='costTotal';total.setAttribute('aria-live','polite');footer.append(add,total);wrapper.append(footer);$('sectionFields').append(wrapper);}else $('sectionFields').append(box);
+  input.placeholder=key==='cost_estimate'?t('填写估算依据、排除项、预算说明或限制条件。'):t('输入正文；换行分段。留空则保留空白模板。');
+  input.addEventListener('input',()=>{project.sections[key]=input.value;scheduleSave();});box.append(input);if(key==='cost_estimate'){const wrapper=node('div',undefined,'cost-editor');wrapper.append(box);const scroll=node('div',undefined,'cost-table-scroll');scroll.innerHTML=t('<table class=cost-table><thead><tr><th>Item</th><th>Description</th><th>Quantity</th><th>Unit</th><th>Rate</th><th>Cost</th><th>Priority</th><th>操作</th></tr></thead><tbody id=costRows></tbody></table>');wrapper.append(scroll);const footer=node('div',undefined,'cost-footer');const add=node('button',t('＋ 新增费用项'));add.id='addCostRow';add.type='button';add.onclick=()=>{project.cost_rows.push({description:'',quantity:'',unit:'',rate:'',priority:''});renderCosts();scheduleSave();};const total=node('strong');total.id='costTotal';total.setAttribute('aria-live','polite');footer.append(add,total);wrapper.append(footer);$('sectionFields').append(wrapper);}else $('sectionFields').append(box);
  }
  for(const [key,label] of Object.entries(metadataLabels)){
   if(personRoles[key]){buildPersonField(key);continue;}
@@ -60,10 +62,10 @@ function buildFields(){
  for(const key of fields){
   const box=node('div');const label=node('label',labels[key]);label.htmlFor='rating_'+key;
   const select=node('select');select.id='rating_'+key;
-  const empty=node('option','请选择…');empty.value='';select.append(empty);
+  const empty=node('option',t('请选择…'));empty.value='';select.append(empty);
   for(const value of boot.options[key]){const option=node('option',value);option.value=value;select.append(option);}
-  const custom=node('option','手动填写 / 补充描述…');custom.value='__manual__';select.append(custom);
-  const input=node('input');input.id='manual_rating_'+key;input.placeholder='填写或补充描述';input.maxLength=1000;input.hidden=true;input.setAttribute('aria-label',labels[key]+'手动填写');
+  const custom=node('option',t('手动填写 / 补充描述…'));custom.value='__manual__';select.append(custom);
+  const input=node('input');input.id='manual_rating_'+key;input.placeholder=t('填写或补充描述');input.maxLength=1000;input.hidden=true;input.setAttribute('aria-label',labels[key]+t('手动填写'));
   select.addEventListener('change',()=>{
    input.hidden=select.value!=='__manual__';
    if(!input.hidden){input.value=project.editor[key]||'';input.focus();}
@@ -78,7 +80,7 @@ function buildFields(){
    const selected=boot.library[key].find(r=>r.id===$(key+'Select').value);if(!selected)return;
    project.editor[key]=selected.text;project.editor[key+'_source']=selected.id;
    $(key+'Search').value='';renderLibrary(key);$(key+'Select').value=selected.id;
-   $(key+'Text').value=selected.text;$(key+'Source').textContent='来源 '+selected.id+' · 可继续编辑';scheduleSave();
+   $(key+'Text').value=selected.text;$(key+'Source').textContent=t('来源 ')+selected.id+t(' · 可继续编辑');scheduleSave();
   });
   $(key+'Text').addEventListener('input',()=>{project.editor[key]=$(key+'Text').value;scheduleSave();});
  }
@@ -90,25 +92,29 @@ function costValue(row){
  return (qty*rate+5000000000n)/10000000000n;
 }
 function money(cents){return (cents/100n).toLocaleString('en-AU')+'.'+(cents%100n).toString().padStart(2,'0');}
-function updateCostTotal(){let total=0n,complete=true;project.cost_rows.forEach((row,index)=>{const value=costValue(row);if(value===null)complete=false;else total+=value;const cell=$('costValue_'+index);if(cell)cell.textContent=value===null?'—':money(value);});$('costTotal').textContent=(complete?'Total · 合计：':'Subtotal · 已填写项小计：')+money(total);}
+function updateCostTotal(){let total=0n,complete=true;project.cost_rows.forEach((row,index)=>{const value=costValue(row);if(value===null)complete=false;else total+=value;const cell=$('costValue_'+index);if(cell)cell.textContent=value===null?'—':money(value);});$('costTotal').textContent=(complete?t('Total · 合计：'):t('Subtotal · 已填写项小计：'))+money(total);}
 function renderCosts(){
  const body=$('costRows');body.replaceChildren();
  project.cost_rows.forEach((row,index)=>{
   const tr=node('tr');tr.append(node('td',String(index+1)));
   for(const key of ['description','quantity','unit','rate','priority']){
-   const cell=node('td'),input=node(key==='priority'?'select':key==='description'?'textarea':'input');input.setAttribute('aria-label',`费用项 ${index+1} ${key}`);
-   if(key==='priority'){for(const value of ['','Urgent','Critical','High','Moderate','Low']){const option=node('option',value||'请选择');option.value=value;input.append(option);}}
+   const cell=node('td'),input=node(key==='priority'?'select':key==='description'?'textarea':'input');input.setAttribute('aria-label',t("费用项 {0} {1}",index+1,key));
+   if(key==='priority'){
+    for(const value of ['',...boot.options.priority]){const option=node('option',value||t('请选择'));option.value=value;input.append(option);}
+    // Preserve older cost-row ratings without offering them on new rows.
+    if(row.priority&&!boot.options.priority.includes(row.priority)){const option=node('option',row.priority+t('（已有值）'));option.value=row.priority;input.append(option);}
+   }
    else {input.maxLength=key==='description'?5000:100;if(['quantity','rate'].includes(key))input.inputMode='decimal';}
    input.value=row[key]||'';input.addEventListener(key==='priority'?'change':'input',()=>{row[key]=input.value;updateCostTotal();scheduleSave();});cell.append(input);tr.append(cell);
    if(key==='rate'){const value=node('td');value.id='costValue_'+index;value.className='cost-money';tr.append(value);}
   }
-  const cell=node('td'),remove=node('button','删除');remove.type='button';remove.setAttribute('aria-label',`删除费用项 ${index+1}`);remove.onclick=async()=>{if(await confirmAction('删除费用项','确认删除这条费用记录？')){project.cost_rows.splice(index,1);renderCosts();scheduleSave();}};cell.append(remove);tr.append(cell);body.append(tr);
+  const cell=node('td'),remove=node('button',t('删除'));remove.type='button';remove.setAttribute('aria-label',t("删除费用项 {0}",index+1));remove.onclick=async()=>{if(await confirmAction(t('删除费用项'),t('确认删除这条费用记录？'))){project.cost_rows.splice(index,1);renderCosts();scheduleSave();}};cell.append(remove);tr.append(cell);body.append(tr);
  });updateCostTotal();
 }
 function buildPersonField(key){
  const box=node('div',undefined,'person-field');const label=node('label',personRoles[key].label);label.htmlFor='meta_'+key;
  const select=node('select');select.id='meta_'+key;
- const manual=node('input');manual.id='manual_'+key;manual.maxLength=500;manual.placeholder='手动填写姓名';manual.setAttribute('aria-label',personRoles[key].label+'姓名');manual.hidden=true;
+ const manual=node('input');manual.id='manual_'+key;manual.maxLength=500;manual.placeholder=t('手动填写姓名');manual.setAttribute('aria-label',personRoles[key].label+t('姓名'));manual.hidden=true;
  const details=node('p',undefined,'person-details');details.id='details_'+key;details.setAttribute('aria-live','polite');
  select.addEventListener('change',()=>{
   if(select.value==='__manual__'){manual.hidden=false;WorkbenchState.manualPerson(project.metadata,key,personRoles[key].prefix);manual.value=project.metadata[key]||'';manual.focus();}
@@ -133,10 +139,10 @@ function renderPersonChoices(){
  if(!project)return;
  for(const [key,spec] of Object.entries(personRoles)){
   const select=$('meta_'+key);select.replaceChildren();
-  const empty=node('option','请选择'+(spec.role==='author'?'作者':'审阅者')+'…');empty.value='';select.append(empty);
+  const empty=node('option',t(spec.role==='author'?'请选择作者…':'请选择审阅者…'));empty.value='';select.append(empty);
   const people=boot.personnel.people.filter(p=>p.roles.includes(spec.role));
   for(const person of people){const option=node('option',person.name);option.value=person.id;select.append(option);}
-  const manual=node('option','手动填写姓名');manual.value='__manual__';select.append(manual);
+  const manual=node('option',t('手动填写姓名'));manual.value='__manual__';select.append(manual);
   const name=project.metadata[key]||'',ref=project.metadata[key+'_id'];
   const selected=people.find(p=>p.name===name&&(!ref||p.id===ref));
   select.value=selected?selected.id:name?'__manual__':'';
@@ -146,23 +152,23 @@ function renderPersonChoices(){
 }
 function loadPersonnelEditor(person=null){
  personnelEditorId=person?.id||null;personnelDirty=false;
- $('personnelEditorTitle').textContent=person?'编辑人员':'新增人员';
+ $('personnelEditorTitle').textContent=person?t('编辑人员'):t('新增人员');
  for(const key of ['name','qualifications','title'])$('personnel_'+key).value=person?.[key]||'';
  $('personnel_author').checked=person?person.roles.includes('author'):true;
  $('personnel_reviewer').checked=person?person.roles.includes('reviewer'):true;
- $('deletePersonnel').hidden=!person;$('savePersonnel').textContent=person?'保存修改':'添加人员';
+ $('deletePersonnel').hidden=!person;$('savePersonnel').textContent=person?t('保存修改'):t('添加人员');
  renderPersonnelList();
 }
 function renderPersonnelList(){
  const list=$('personnelList');list.replaceChildren();
- if(!boot.personnel.people.length)list.append(node('p','人员库为空，添加人员后即可在报告中选择。','personnel-empty'));
+ if(!boot.personnel.people.length)list.append(node('p',t('人员库为空，添加人员后即可在报告中选择。'),'personnel-empty'));
  for(const person of boot.personnel.people){
   const button=node('button',undefined,'personnel-card');button.type='button';button.classList.toggle('selected',person.id===personnelEditorId);
-  button.append(node('strong',person.name),node('small',person.title||'职位未填写'),node('small',person.roles.map(r=>r==='author'?'作者':'审阅者').join('、')));
+  button.append(node('strong',person.name),node('small',person.title||t('职位未填写')),node('small',person.roles.map(r=>r==='author'?t('作者'):t('审阅者')).join(WorkbenchI18n.language==='en'?', ':'、')));
   button.onclick=action(async()=>{if(await discardPersonnelChanges())loadPersonnelEditor(person);});list.append(button);
  }
 }
-async function discardPersonnelChanges(){return !personnelDirty||await confirmAction('放弃未保存的人员修改','人员资料尚未保存。是否放弃本次修改？');}
+async function discardPersonnelChanges(){return !personnelDirty||await confirmAction(t('放弃未保存的人员修改'),t('人员资料尚未保存。是否放弃本次修改？'));}
 async function openPersonnel(){
  boot.personnel=await api('/api/personnel');renderPersonChoices();loadPersonnelEditor(boot.personnel.people[0]);$('personnelDialog').showModal();
 }
@@ -170,40 +176,40 @@ async function savePersonnel(){
  const person={id:personnelEditorId||crypto.randomUUID().replaceAll('-',''),roles:[]};
  for(const key of ['name','qualifications','title'])person[key]=$('personnel_'+key).value.trim();
  for(const role of ['author','reviewer'])if($('personnel_'+role).checked)person.roles.push(role);
- if(!person.name)throw new Error('请填写姓名');if(!person.roles.length)throw new Error('请选择作者或审阅者角色');
+ if(!person.name)throw new Error(t('请填写姓名'));if(!person.roles.length)throw new Error(t('请选择作者或审阅者角色'));
  const snapshot=structuredClone(boot.personnel),index=snapshot.people.findIndex(p=>p.id===person.id);
  if(index>=0)snapshot.people[index]=person;else snapshot.people.push(person);
- boot.personnel=await api('/api/personnel',snapshot);loadPersonnelEditor(boot.personnel.people.find(p=>p.id===person.id));renderPersonChoices();toast('人员资料已保存');
+ boot.personnel=await api('/api/personnel',snapshot);loadPersonnelEditor(boot.personnel.people.find(p=>p.id===person.id));renderPersonChoices();toast(t('人员资料已保存'));
 }
 async function deletePersonnel(){
  const person=boot.personnel.people.find(p=>p.id===personnelEditorId);if(!person)return;
- if(!(await confirmAction('删除人员',`从人员库删除 ${person.name}？已填写报告中的姓名、资质和职位会保留。`)))return;
+ if(!(await confirmAction(t('删除人员'),t("从人员库删除 {0}？已填写报告中的姓名、资质和职位会保留。",person.name))))return;
  const snapshot=structuredClone(boot.personnel);snapshot.people=snapshot.people.filter(p=>p.id!==person.id);
- boot.personnel=await api('/api/personnel',snapshot);loadPersonnelEditor(boot.personnel.people[0]);renderPersonChoices();toast('人员已删除');
+ boot.personnel=await api('/api/personnel',snapshot);loadPersonnelEditor(boot.personnel.people[0]);renderPersonChoices();toast(t('人员已删除'));
 }
 async function closePersonnel(){if(await discardPersonnelChanges())$('personnelDialog').close();}
 function renderLibrary(key){
  const select=$(key+'Select'),selected=select.value,search=$(key+'Search').value.toLowerCase().trim();select.replaceChildren();
- const first=node('option',search?'选择搜索结果…':'从文字库选择…');first.value='';select.append(first);
+ const first=node('option',search?t('选择搜索结果…'):t('从文字库选择…'));first.value='';select.append(first);
  const rows=boot.library[key].filter(r=>(r.text+' '+r.elements+' '+r.id).toLowerCase().includes(search));
  for(const r of rows){const opt=node('option',r.id+' · '+r.text);opt.value=r.id;select.append(opt);}
  if(rows.some(r=>r.id===selected))select.value=selected;
- $(key+'Count').textContent=search?`${rows.length} 个结果`:`${boot.library[key].length} 条`;
+ $(key+'Count').textContent=search?t("{0} 个结果",rows.length):t("{0} 条",boot.library[key].length);
 }
 function updateTitle(){
- $('projectTitle').textContent=project.metadata.site||'新的检查报告';
- $('projectSubtitle').textContent=project.metadata.report_number?project.metadata.report_number+' · '+(project.metadata.client||'客户未填写'):'先填写报告信息，再整理现场照片。';
+ $('projectTitle').textContent=project.metadata.site||t('新的检查报告');
+ $('projectSubtitle').textContent=project.metadata.report_number?project.metadata.report_number+' · '+(project.metadata.client||t('客户未填写')):t('先填写报告信息，再整理现场照片。');
 }
 function updateSummary(){
  if(!project)return;
  const count=project.items.length,photos=project.items.reduce((n,i)=>n+i.photos.length,0);
- $('itemCount').textContent=count;$('reportSummary').textContent=count?`${count} 个检查项 · ${photos} 张照片`:'还没有已保存的检查项';
- $('generateButton').disabled=busy||count===0;$('previewButton').disabled=busy||count===0;$('previewButton').textContent=previewJob?'查看预览进度 / 结果':'预览报告';
+ $('itemCount').textContent=count;$('reportSummary').textContent=count?(WorkbenchI18n.language==='en'?count+(count===1?' inspection item':' inspection items')+' · '+photoCountText(photos):t("{0} 个检查项 · {1} 张照片",count,photos)):t('还没有已保存的检查项');
+ $('generateButton').disabled=busy||count===0;$('previewButton').disabled=busy||count===0;$('previewButton').textContent=previewJob?t('查看预览进度 / 结果'):t('预览报告');
 }
 function renderProjects(){
  const select=$('projectSelect');select.replaceChildren();
- for(const p of boot.projects){const op=node('option',(p.site||'未命名报告')+` · ${p.count} 项`);op.value=p.id;select.append(op);}
- if(project){if(!boot.projects.some(p=>p.id===project.id)){const op=node('option',project.metadata.site||'新的检查报告');op.value=project.id;select.prepend(op);}select.value=project.id;}
+ for(const p of boot.projects){const count=WorkbenchI18n.language==='en'?' · '+p.count+(p.count===1?' item':' items'):t(" · {0} 项",p.count);const op=node('option',(p.site||t('未命名报告'))+count);op.value=p.id;select.append(op);}
+ if(project){if(!boot.projects.some(p=>p.id===project.id)){const op=node('option',project.metadata.site||t('新的检查报告'));op.value=project.id;select.prepend(op);}select.value=project.id;}
 }
 function renderEditor(){
  for(const key of fields){
@@ -214,24 +220,24 @@ function renderEditor(){
  for(const key of ['observation','recommendation']){
   $(key+'Text').value=project.editor[key]||'';$(key+'Search').value='';renderLibrary(key);
   $(key+'Select').value=project.editor[key+'_source']||'';
-  $(key+'Source').textContent=project.editor[key+'_source']?'来源 '+project.editor[key+'_source']+' · 可继续编辑':'手动输入';
+  $(key+'Source').textContent=project.editor[key+'_source']?t('来源 ')+project.editor[key+'_source']+t(' · 可继续编辑'):t('手动输入');
  }
  updateEditorTitle();
- $('editingBadge').hidden=!project.editor_id;$('saveItem').textContent=project.editor_id?'Save · 保存修改':'Save · 保存检查项';renderPhotos();
+ $('editingBadge').hidden=!project.editor_id;$('saveItem').textContent=project.editor_id?t('Save · 保存修改'):t('Save · 保存检查项');renderPhotos();
 }
 function renderPhotos(){
- const grid=$('photoGrid');grid.replaceChildren();$('photoCount').textContent=project.editor.photos.length+' 张';
+ const grid=$('photoGrid');grid.replaceChildren();$('photoCount').textContent=photoCountText(project.editor.photos.length,true);
  project.editor.photos.forEach((photo,index)=>{
   const card=node('div',undefined,'photo-card');const image=node('img');image.src='/photos/'+photo.id+'.jpg';image.alt=photo.caption||photo.name;image.loading='lazy';
   const name=node('span',`${index+1}. ${photo.name}`,'name');name.title=photo.name;const controls=node('div',undefined,'photo-controls');
-  const caption=node('input');caption.className='photo-caption';caption.value=photo.caption||'';caption.maxLength=200;caption.placeholder='照片名称（可留空）';caption.setAttribute('aria-label','照片 '+(index+1)+' 名称');
+  const caption=node('input');caption.className='photo-caption';caption.value=photo.caption||'';caption.maxLength=200;caption.placeholder=t('照片名称（可留空）');caption.setAttribute('aria-label',t('照片 ')+(index+1)+t(' 名称'));
   caption.addEventListener('input',()=>{photo.caption=caption.value;image.alt=photo.caption||photo.name;scheduleSave();});
   for(const [label,title,fn] of [
-   ['←','照片前移',()=>{if(index>0)[project.editor.photos[index-1],project.editor.photos[index]]=[photo,project.editor.photos[index-1]];renderPhotos();scheduleSave();}],
-   ['→','照片后移',()=>{if(index<project.editor.photos.length-1)[project.editor.photos[index+1],project.editor.photos[index]]=[photo,project.editor.photos[index+1]];renderPhotos();scheduleSave();}],
-   ['编辑','编辑照片',()=>openPhotoEditor(photo,index)],
-   ['↻','顺时针旋转照片',async()=>{const p=await api('/api/rotate',{id:photo.id});project.editor.photos[index]={...photo,...p};renderPhotos();await flush();}],
-   ['×','移除当前照片',()=>{project.editor.photos.splice(index,1);renderPhotos();scheduleSave();}]
+   ['←',t('照片前移'),()=>{if(index>0)[project.editor.photos[index-1],project.editor.photos[index]]=[photo,project.editor.photos[index-1]];renderPhotos();scheduleSave();}],
+   ['→',t('照片后移'),()=>{if(index<project.editor.photos.length-1)[project.editor.photos[index+1],project.editor.photos[index]]=[photo,project.editor.photos[index+1]];renderPhotos();scheduleSave();}],
+   [t('编辑'),t('编辑照片'),()=>openPhotoEditor(photo,index)],
+   ['↻',t('顺时针旋转照片'),async()=>{const p=await api('/api/rotate',{id:photo.id});project.editor.photos[index]={...photo,...p};renderPhotos();await flush();}],
+   ['×',t('移除当前照片'),()=>{project.editor.photos.splice(index,1);renderPhotos();scheduleSave();}]
   ]){const b=node('button',label);b.title=title;b.setAttribute('aria-label',title);b.onclick=action(fn);controls.append(b);}
   card.append(image,name,caption,controls);grid.append(card);
  });
@@ -287,7 +293,7 @@ function renderPhotoEditor(){
  }else if(photoEditor.drag?.mark){drawPhotoMark(ctx,photoEditor.drag.mark);}
  for(const tool of ['crop','circle','rectangle','arrow','pen','pan'])$('photoTool'+tool[0].toUpperCase()+tool.slice(1)).setAttribute('aria-pressed',photoEditor.tool===tool);
  $('photoCropSettings').hidden=photoEditor.tool!=='crop';$('photoMarkSettings').hidden=['crop','pan'].includes(photoEditor.tool);
- const hints={crop:'拖动框内移动范围，拖动四角调整大小；框外拖动可重新框选。',circle:'拖动绘制圆圈，标出需要注意的区域。',rectangle:'拖动框选标注区域。',arrow:'从起点拖向需要指示的位置。',pen:'按住鼠标自由绘制。',pan:'放大后拖动照片查看细节。'};
+ const hints={crop:t('拖动框内移动范围，拖动四角调整大小；框外拖动可重新框选。'),circle:t('拖动绘制圆圈，标出需要注意的区域。'),rectangle:t('拖动框选标注区域。'),arrow:t('从起点拖向需要指示的位置。'),pen:t('按住鼠标自由绘制。'),pan:t('放大后拖动照片查看细节。')};
  $('photoEditHint').textContent=hints[photoEditor.tool];$('photoEditSize').textContent=image.width+' × '+image.height+' px';$('photoZoomValue').textContent=Math.round(scale*100)+'%';
  $('applyPhotoCrop').disabled=busy||!selection||selection[2]-selection[0]<10||selection[3]-selection[1]<10;
  for(const id of ['undoPhotoEdit','resetPhotoEdit','savePhotoEdit'])$(id).disabled=busy||!photoEditor.operations.length;
@@ -295,7 +301,7 @@ function renderPhotoEditor(){
 }
 function closePhotoEditor(){if(busy)return;$('photoEditorDialog').close();photoEditor=null;}
 function commitPhotoEdit(operation){
- if(photoEditor.operations.length>=50){toast('最多支持 50 步编辑，请先保存照片。');return;}
+ if(photoEditor.operations.length>=50){toast(t('最多支持 50 步编辑，请先保存照片。'));return;}
  photoEditor.operations.push(operation);photoEditor.redo=[];photoEditor.rendered=null;photoEditor.selection=null;
  if(photoEditor.tool==='crop')setPhotoCrop();renderPhotoEditor();
 }
@@ -359,15 +365,15 @@ function setupPhotoEditor(){
  $('photoEditorDialog').oncancel=event=>{event.preventDefault();closePhotoEditor();};
  $('savePhotoEdit').onclick=action(async()=>{
   const edit=photoEditor;if(!edit?.operations.length)return;
-  if(edit.drag)throw new Error('请完成当前操作后保存');
-  if(project.id!==edit.projectId||project.editor.photos[edit.index]?.id!==edit.photoId)throw new Error('照片已改变，请重新打开编辑窗口');
+  if(edit.drag)throw new Error(t('请完成当前操作后保存'));
+  if(project.id!==edit.projectId||project.editor.photos[edit.index]?.id!==edit.photoId)throw new Error(t('照片已改变，请重新打开编辑窗口'));
   const saved=await api('/api/photo-edit',{id:edit.photoId,operations:edit.operations});
   const previous=project.editor.photos[edit.index];project.editor.photos[edit.index]={...previous,...saved};
   try{await flush();}catch(error){if(error.code!=='revision_conflict')project.editor.photos[edit.index]=previous;throw error;}
-  $('photoEditorDialog').close();photoEditor=null;renderPhotos();toast('照片已保存；点击 Save 将修改加入检查项。');
+  $('photoEditorDialog').close();photoEditor=null;renderPhotos();toast(t('照片已保存；点击 Save 将修改加入检查项。'));
  });
 }
-function updateEditorTitle(){$('editorTitle').textContent=project.editor_id?'编辑检查项 '+(project.items.findIndex(i=>i.id===project.editor_id)+1):'整理一个检查项';}
+function updateEditorTitle(){$('editorTitle').textContent=project.editor_id?t('编辑检查项 ')+(project.items.findIndex(i=>i.id===project.editor_id)+1):t('整理一个检查项');}
 function clearItemDrag(){
  const previous=itemDrag;
  itemDrag=null;
@@ -419,11 +425,11 @@ async function moveItem(id,targetId,after=false){
 function renderItems(){
  clearItemDrag();
  const list=$('savedItems');list.replaceChildren();
- if(!project.items.length){const empty=node('div',undefined,'empty-state');empty.append(node('strong','现场发现，从第一张照片开始。'),node('p','保存的检查项会出现在这里，可以编辑、调整顺序，然后一起生成报告。'));list.append(empty);}
+ if(!project.items.length){const empty=node('div',undefined,'empty-state');empty.append(node('strong',t('现场发现，从第一张照片开始。')),node('p',t('保存的检查项会出现在这里，可以编辑、调整顺序，然后一起生成报告。')));list.append(empty);}
  project.items.forEach((item,index)=>{
   const row=node('article',undefined,'saved-item');row.dataset.itemId=item.id;
   const handle=node('button',undefined,'item-number item-drag-handle');handle.type='button';handle.disabled=project.items.length<2;
-  handle.title='拖动排序';handle.setAttribute('aria-label','拖动排序检查项 '+(index+1));handle.append(node('span','⠿','item-grip'),node('span',String(index+1).padStart(2,'0')));row.append(handle);
+  handle.title=t('拖动排序');handle.setAttribute('aria-label',t('拖动排序检查项 ')+(index+1));handle.append(node('span','⠿','item-grip'),node('span',String(index+1).padStart(2,'0')));row.append(handle);
   handle.addEventListener('pointerdown',event=>{
    if(event.button!==0||busy||project.items.length<2)return;
    event.preventDefault();handle.focus();
@@ -446,80 +452,91 @@ function renderItems(){
   handle.addEventListener('keydown',event=>{if(event.key==='Escape')clearItemDrag();});
   const image=node('img');image.src='/photos/'+item.photos[0].id+'.jpg';image.alt=item.photos[0].caption||item.photos[0].name;image.className='item-photo';image.draggable=false;row.append(image);
   const obs=node('div',undefined,'item-content');obs.append(node('strong',item.element),node('p',item.observation));
-  const meta=node('div',undefined,'item-meta');const priority=node('span',item.priority,'priority');priority.dataset.priority=item.priority;meta.append(priority,node('span',item.photos.length+' 张照片'),node('span',item.condition_rating));obs.append(meta);row.append(obs);
+  const meta=node('div',undefined,'item-meta');const priority=node('span',item.priority,'priority');priority.dataset.priority=item.priority;meta.append(priority,node('span',photoCountText(item.photos.length)),node('span',item.condition_rating));obs.append(meta);row.append(obs);
   const rec=node('div',undefined,'item-content');rec.append(node('strong','Recommendation'),node('p',item.recommendation||'—'));row.append(rec);
   const actions=node('div',undefined,'item-actions');
   for(const [label,fn] of [
-   ['编辑',async()=>{if(editorHasContent()&&project.editor_id!==item.id&&!(await confirmAction('切换到已保存项','当前编辑区已自动保存。切换后会替换编辑区内容，请先保存需要加入报告的检查项。')))return;project.editor=structuredClone(item);delete project.editor.id;project.editor_id=item.id;renderEditor();await flush();$('editorTitle').scrollIntoView({behavior:'smooth',block:'center'});}],
+   [t('编辑'),async()=>{if(editorHasContent()&&project.editor_id!==item.id&&!(await confirmAction(t('切换到已保存项'),t('当前编辑区已自动保存。切换后会替换编辑区内容，请先保存需要加入报告的检查项。'))))return;project.editor=structuredClone(item);delete project.editor.id;project.editor_id=item.id;renderEditor();await flush();$('editorTitle').scrollIntoView({behavior:'smooth',block:'center'});}],
    ['↑',async()=>{if(index>0)await moveItem(item.id,project.items[index-1].id);}],
    ['↓',async()=>{if(index<project.items.length-1)await moveItem(item.id,project.items[index+1].id,true);}],
-   ['删除',async()=>{if(!(await confirmAction('删除检查项',`从报告中删除第 ${index+1} 项？原始照片仍保存在本地。`)))return;project.items.splice(index,1);if(project.editor_id===item.id){project.editor=blankEditor();project.editor_id=null;renderEditor();}renderItems();await flush();}]
-  ]){const b=node('button',label);b.onclick=action(fn);b.setAttribute('aria-label',label+'检查项 '+(index+1));actions.append(b);}
+   [t('删除'),async()=>{if(!(await confirmAction(t('删除检查项'),t("从报告中删除第 {0} 项？原始照片仍保存在本地。",index+1))))return;project.items.splice(index,1);if(project.editor_id===item.id){project.editor=blankEditor();project.editor_id=null;renderEditor();}renderItems();await flush();}]
+  ]){const b=node('button',label);b.onclick=action(fn);b.setAttribute('aria-label',label+t('检查项 ')+(index+1));actions.append(b);}
   row.append(actions);list.append(row);
  });updateSummary();updateEditorTitle();
 }
 function editorHasContent(){return project.editor.photos.length||project.editor.observation||project.editor.recommendation;}
 function loadProject(value){project=value;project.sections??={};project.cost_rows??=[];renderCosts();saver.reset(value.revision);for(const key of Object.keys(sectionLabels))$('section_'+key).value=project.sections[key]||'';for(const key of Object.keys(metadataLabels))if(!personRoles[key])$('meta_'+key).value=project.metadata[key]||'';renderPersonChoices();updateTitle();renderEditor();renderItems();renderProjects();}
 async function uploadPhotos(files){
- if(!files.length)return;if(project.editor.photos.length+files.length>100)throw new Error('一个检查项最多 100 张照片');
+ if(!files.length)return;if(project.editor.photos.length+files.length>100)throw new Error(t('一个检查项最多 100 张照片'));
  const failures=[];
  for(let i=0;i<files.length;i++){
-  const file=files[i];$('editorHint').textContent=`正在导入 ${i+1} / ${files.length}：${file.name}`;
+  const file=files[i];$('editorHint').textContent=t("正在导入 {0} / {1}：{2}",i+1,files.length,file.name);
   try{const photo=await api('/api/photo',file,{'X-Filename':encodeURIComponent(file.name)});project.editor.photos.push(photo);renderPhotos();await persist();}
   catch(e){failures.push(file.name+'：'+e.message);}
  }
- $('editorHint').textContent='已导入照片。填写描述与评级后，保存检查项。';
- if(failures.length)throw new Error('部分照片未导入：\n'+failures.join('\n'));
- toast('照片已导入并保存到草稿');
+ $('editorHint').textContent=t('已导入照片。填写描述与评级后，保存检查项。');
+ if(failures.length)throw new Error(t('部分照片未导入：\n')+failures.join('\n'));
+ toast(t('照片已导入并保存到草稿'));
 }
 async function saveItem(){
  const e=project.editor;
- if(!e.photos.length)throw new Error('请先加入照片');
- if(fields.some(key=>!e[key]?.trim()))throw new Error('请填写 Element 和四项评级，可下拉选择或手动输入');
- if(!e.observation.trim())throw new Error('请填写 Observation');
+ if(!e.photos.length)throw new Error(t('请先加入照片'));
+ if(fields.some(key=>!e[key]?.trim()))throw new Error(t('请填写 Element 和四项评级，可下拉选择或手动输入'));
+ if(!e.observation.trim())throw new Error(t('请填写 Observation'));
  const item={...structuredClone(e),id:project.editor_id||crypto.randomUUID().replaceAll('-','')};
  const index=project.items.findIndex(i=>i.id===item.id),previousItem=index>=0?structuredClone(project.items[index]):null;if(index>=0)project.items[index]=item;else project.items.push(item);
  const previous=structuredClone(project.editor);const previousId=project.editor_id;
  project.editor=blankEditor();project.editor_id=null;
- try{await flush();renderItems();renderEditor();toast(index>=0?'检查项修改已保存':'检查项已保存，可以继续下一项');}
+ try{await flush();renderItems();renderEditor();toast(index>=0?t('检查项修改已保存'):t('检查项已保存，可以继续下一项'));}
  catch(error){if(error.code!=='revision_conflict'){project.editor=previous;project.editor_id=previousId;if(index<0)project.items.pop();else project.items[index]=previousItem;}renderItems();renderEditor();throw error;}
 }
 async function beginPreview(){
  if(previewJob){if(!$('reportPreviewDialog').open)$('reportPreviewDialog').showModal();await pollPreview();return;}
- await flush();if(editorHasContent()&&!(await confirmAction('预览已保存的检查项','当前编辑区还有内容。预览只包含已保存检查项；若要包含当前项，请取消后点击 Save。')))return;
+ await flush();if(editorHasContent()&&!(await confirmAction(t('预览已保存的检查项'),t('当前编辑区还有内容。预览只包含已保存检查项；若要包含当前项，请取消后点击 Save。'))))return;
  clearTimeout(previewTimer);$('reportPreviewPages').replaceChildren();$('previewDownloads').hidden=true;$('retryPreview').hidden=true;
- if(!$('reportPreviewDialog').open)$('reportPreviewDialog').showModal();$('previewProgress').textContent='正在提交报告快照…';
+ if(!$('reportPreviewDialog').open)$('reportPreviewDialog').showModal();$('previewProgress').textContent=t('正在提交报告快照…');
  try{previewJob=await api('/api/preview',{id:project.id});updateSummary();await pollPreview();}
  catch(error){previewJob=null;$('previewProgress').textContent=error.message;$('retryPreview').hidden=false;updateSummary();}
 }
 async function pollPreview(){
  if(!previewJob)return;
  try{
-  const result=await api('/api/preview-job?id='+previewJob.id);previewJob=result;$('previewProgress').textContent=result.message;
-  $('previewSnapshot').textContent=`${result.site} · 草稿版本 ${result.project_revision}（后续编辑不会改变此份预览）`;
-  if(result.status==='failed')throw new Error(result.error);
+  const result=await api('/api/preview-job?id='+previewJob.id);previewJob=result;$('previewProgress').textContent=t(result.message);
+  $('previewSnapshot').textContent=t("{0} · 草稿版本 {1}（后续编辑不会改变此份预览）",result.site,result.project_revision);
+  if(result.status==='failed')throw new Error(t(result.error));
   if(result.status==='ready'){
    $('reportPreviewPages').replaceChildren();
    for(let page=1;page<=result.pages;page++){
-    const sheet=node('figure'),image=node('img');image.src='/api/preview-page?id='+result.report_id+'&page='+page;image.alt='报告第 '+page+' 页';image.loading='lazy';sheet.append(image,node('figcaption','第 '+page+' / '+result.pages+' 页'));$('reportPreviewPages').append(sheet);
+    const sheet=node('figure'),image=node('img');image.src='/api/preview-page?id='+result.report_id+'&page='+page;image.alt=t('报告第 ')+page+t(' 页');image.loading='lazy';sheet.append(image,node('figcaption',t('第 ')+page+' / '+result.pages+t(' 页')));$('reportPreviewPages').append(sheet);
    }
    $('openPreviewPdf').href='/api/preview-pdf?id='+result.report_id;$('downloadPreviewWord').href='/api/download?id='+result.report_id+'&name='+encodeURIComponent(result.name);$('downloadPreviewWord').download=result.name;
-   $('previewDownloads').hidden=false;$('retryPreview').hidden=false;$('retryPreview').textContent='重新预览已保存报告';updateSummary();return;
+   $('previewDownloads').hidden=false;$('retryPreview').hidden=false;$('retryPreview').textContent=t('重新预览已保存报告');updateSummary();return;
   }
   previewTimer=setTimeout(pollPreview,600);
  }catch(error){previewJob=null;$('previewProgress').textContent=error.message;$('retryPreview').hidden=false;updateSummary();}
 }
 async function init(){
- boot=await api('/api/bootstrap');buildFields();setupPhotoEditor();$('dataFolder').textContent='数据目录：'+boot.data_folder;
+ await WorkbenchI18n.ready;WorkbenchI18n.apply();
+ boot=await api('/api/bootstrap');buildFields();setupPhotoEditor();$('dataFolder').textContent=t('数据目录：')+boot.data_folder;
  window.addEventListener('blur',clearItemDrag);window.addEventListener('resize',clearItemDrag);
- $('appVersion').textContent='Version '+boot.version+' · 本地开发预览 · 无需登录';
+ $('appVersion').textContent='Version '+boot.version+t(' · 本地运行 · 无需登录');
  saver=new WorkbenchState.DraftSaver({snapshot:()=>project,send:snapshot=>api('/api/save',snapshot),onChange:saveStatus,onConflict:openSaveConflict,onSaved:saved=>{
   if(project.id===saved.id){project.revision=saved.revision;project.updated=saved.updated;}
   const entry={id:saved.id,site:saved.metadata.site,report_number:saved.metadata.report_number,updated:saved.updated,count:saved.items.length},index=boot.projects.findIndex(p=>p.id===saved.id);
   if(index>=0)boot.projects[index]=entry;else boot.projects.unshift(entry);renderProjects();
  }});
+ if($('languageSelect')){
+ $('languageSelect').value=WorkbenchI18n.language;
+ $('languageSelect').onchange=action(async event=>{
+  const choice=event.target.value;event.target.value=WorkbenchI18n.language;
+  if(personnelDirty||photoEditor?.operations.length){toast(t('请先保存人员资料或照片编辑，再切换语言。'));return;}
+  await flush();
+  if(previewJob)sessionStorage.setItem('workbenchLanguagePreview',JSON.stringify({project:project.id,job:previewJob}));
+  WorkbenchI18n.remember(choice);window.location.assign('/?lang='+choice);
+ });
+ }
  $('retrySave').onclick=action(flush);$('resolveConflict').onclick=openSaveConflict;
- $('saveSections').onclick=action(async()=>{await flush();toast('报告章节已保存到本地');});
+ $('saveSections').onclick=action(async()=>{await flush();toast(t('报告章节已保存到本地'));});
  $('conflictCopy').onclick=action(()=>recoverConflict());$('conflictLatest').onclick=action(()=>recoverConflict(true));$('conflictDownload').onclick=action(downloadRecovery);
  $('conflictKeepEditing').onclick=()=>$('saveConflictDialog').close();
  $('saveConflictDialog').oncancel=()=>{};
@@ -531,10 +548,11 @@ async function init(){
  for(const key of ['name','qualifications','title','author','reviewer'])$('personnel_'+key).addEventListener('input',()=>{personnelDirty=true;});
  let last=localStorage.getItem('lastProject');let chosen=boot.projects.find(p=>p.id===last)||boot.projects[0];
  loadProject(chosen?await api('/api/project?id='+chosen.id):await api('/api/new',{}));localStorage.setItem('lastProject',project.id);
+ try{const previous=JSON.parse(sessionStorage.getItem('workbenchLanguagePreview'));if(previous?.project===project.id){previewJob=previous.job;updateSummary();}sessionStorage.removeItem('workbenchLanguagePreview');}catch{}
  $('saveItem').onclick=action(saveItem);
  $('newProject').onclick=action(async()=>{await flush();loadProject(await api('/api/new',{}));boot.projects=(await api('/api/bootstrap')).projects;renderProjects();localStorage.setItem('lastProject',project.id);$('reportDetails').open=true;});
  $('projectSelect').onchange=action(async e=>{const id=e.target.value;await flush();loadProject(await api('/api/project?id='+id));localStorage.setItem('lastProject',id);});
- $('resetEditor').onclick=action(async()=>{if(editorHasContent()&&!(await confirmAction('清空当前编辑区','已保存检查项保持不变。当前编辑区的照片和未保存文字会从草稿中移除。')))return;project.editor=blankEditor();project.editor_id=null;renderEditor();await flush();});
+ $('resetEditor').onclick=action(async()=>{if(editorHasContent()&&!(await confirmAction(t('清空当前编辑区'),t('已保存检查项保持不变。当前编辑区的照片和未保存文字会从草稿中移除。'))))return;project.editor=blankEditor();project.editor_id=null;renderEditor();await flush();});
  $('dropzone').onclick=()=>{if(!busy)$('photoFiles').click();};$('dropzone').onkeydown=e=>{if((e.key==='Enter'||e.key===' ')&&!busy){e.preventDefault();$('photoFiles').click();}};
  $('photoFiles').onchange=action(async e=>{const files=[...e.target.files];e.target.value='';await uploadPhotos(files);});
  const drop=$('dropzone');for(const type of ['dragenter','dragover'])drop.addEventListener(type,e=>{e.preventDefault();drop.classList.add('drag');});
@@ -546,17 +564,17 @@ async function init(){
  $('reportPreviewDialog').addEventListener('close',()=>{updateSummary();});
  $('previewButton').onclick=action(beginPreview);$('retryPreview').onclick=action(async()=>{previewJob=null;await beginPreview();});
  $('generateButton').onclick=action(async()=>{
-  await flush();if(editorHasContent()&&!(await confirmAction('生成已保存的检查项','当前编辑区还有内容。报告只包含下方已保存检查项；若要包含当前项，请取消后点击 Save。')))return;
-  const result=await api('/api/generate',{id:project.id});const a=node('a');a.href='/api/download?id='+result.id+'&name='+encodeURIComponent(result.name);a.download=result.name;document.body.append(a);a.click();a.remove();toast('Word 报告已生成；打开后按提示更新目录。');
+  await flush();if(editorHasContent()&&!(await confirmAction(t('生成已保存的检查项'),t('当前编辑区还有内容。报告只包含下方已保存检查项；若要包含当前项，请取消后点击 Save。'))))return;
+  const result=await api('/api/generate',{id:project.id});const a=node('a');a.href='/api/download?id='+result.id+'&name='+encodeURIComponent(result.name);a.download=result.name;document.body.append(a);a.click();a.remove();toast(t('Word 报告已生成；打开后按提示更新目录。'));
  });
- $('backupButton').onclick=action(async()=>{await flush();const a=node('a');a.href='/api/backup?id='+project.id;a.download='inspection-draft.inspection.zip';document.body.append(a);a.click();a.remove();toast('草稿备份已导出，包含照片和文字。');});
+ $('backupButton').onclick=action(async()=>{await flush();const a=node('a');a.href='/api/backup?id='+project.id;a.download='inspection-draft.inspection.zip';document.body.append(a);a.click();a.remove();toast(t('草稿备份已导出，包含照片和文字。'));});
  $('restoreButton').onclick=()=>{if(!busy)$('restoreFile').click();};
- $('restoreFile').onchange=action(async e=>{const file=e.target.files[0];e.target.value='';if(!file)return;await flush();const p=await api('/api/restore',file);loadProject(p);boot.projects=(await api('/api/bootstrap')).projects;renderProjects();localStorage.setItem('lastProject',p.id);toast('草稿已导入为独立副本');});
- $('libraryButton').onclick=()=>{$('libraryStats').textContent=`Observation ${boot.library.observation.length} 条 · Recommendation ${boot.library.recommendation.length} 条`;$('libraryDialog').showModal();};
+ $('restoreFile').onchange=action(async e=>{const file=e.target.files[0];e.target.value='';if(!file)return;await flush();const p=await api('/api/restore',file);loadProject(p);boot.projects=(await api('/api/bootstrap')).projects;renderProjects();localStorage.setItem('lastProject',p.id);toast(t('草稿已导入为独立副本'));});
+ $('libraryButton').onclick=()=>{$('libraryStats').textContent=t("Observation {0} 条 · Recommendation {1} 条",boot.library.observation.length,boot.library.recommendation.length);$('libraryDialog').showModal();};
  $('closeLibrary').onclick=()=>$('libraryDialog').close();$('importLibraryButton').onclick=()=>$('libraryFile').click();
- $('libraryFile').onchange=action(async e=>{const file=e.target.files[0];e.target.value='';if(!file)return;const result=await api('/api/library',file);boot.library=result.library;for(const key of ['observation','recommendation'])renderLibrary(key);$('libraryDialog').close();toast('文字库已更新。已保存检查项保持原样。');});
- $('exitButton').onclick=action(async()=>{await flush();if(!(await confirmAction('退出工作台','草稿已保存。退出后，下次双击程序可继续。')))return;await api('/api/shutdown',{});document.body.replaceChildren(node('main','工作台已退出，草稿已保存。可以关闭此页面。'));});
+ $('libraryFile').onchange=action(async e=>{const file=e.target.files[0];e.target.value='';if(!file)return;const result=await api('/api/library',file);boot.library=result.library;for(const key of ['observation','recommendation'])renderLibrary(key);$('libraryDialog').close();toast(t('文字库已更新。已保存检查项保持原样。'));});
+ $('exitButton').onclick=action(async()=>{await flush();if(!(await confirmAction(t('退出工作台'),t('草稿已保存。退出后，下次双击程序可继续。'))))return;await api('/api/shutdown',{});document.body.replaceChildren(node('main',t('工作台已退出，草稿已保存。可以关闭此页面。')));});
  window.addEventListener('beforeunload',e=>{if(saver.unsaved||busy||personnelDirty||photoEditor?.operations.length){e.preventDefault();e.returnValue='';}});
  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'&&saver.timer)saver.save().catch(()=>{});});
 }
-init().catch(e=>{status('无法打开工作台',true);toast(e.message);});
+init().catch(e=>{status(t('无法打开工作台'),true);toast(e.message);});

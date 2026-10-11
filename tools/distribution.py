@@ -9,6 +9,13 @@ VERSION = runpy.run_path(str(ROOT / 'workbench/version.py'))['__version__']
 OUTPUT = ROOT / 'outputs' / f'workbench_v{VERSION}'
 ARCHIVE = ROOT / 'outputs' / f'InspectionWorkbench_v{VERSION}_Windows_x64.zip'
 
+def edition_paths(edition):
+    if edition not in ['bilingual','english']:raise ValueError('Invalid edition')
+    name='InspectionWorkbenchEnglish' if edition=='english' else 'InspectionWorkbench'
+    output=ROOT/'outputs'/(f'workbench_english_v{VERSION}' if edition=='english' else f'workbench_v{VERSION}')
+    archive=ROOT/'outputs'/f'{name}_v{VERSION}_Windows_x64.zip'
+    return name,output,archive
+
 
 def require_windows_x64():
     if sys.platform != 'win32' or platform.machine().lower() not in ('amd64', 'x86_64') or sys.maxsize <= 2**32:

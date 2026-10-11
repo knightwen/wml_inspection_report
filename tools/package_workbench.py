@@ -14,7 +14,7 @@ import time
 import urllib.request
 import zipfile
 
-from distribution import ARCHIVE, OUTPUT, ROOT, VERSION, require_windows_x64
+from distribution import ROOT, VERSION, require_windows_x64, edition_paths
 
 
 def copy_licenses(target):
@@ -58,9 +58,10 @@ def download_source(entry):
             time.sleep(attempt + 1)
 
 
-def package():
+def package(edition='bilingual'):
     require_windows_x64()
-    exe = OUTPUT / 'InspectionWorkbench.exe'
+    name,output,archive_path=edition_paths(edition)
+    exe = output / (name+'.exe')
     if not exe.is_file():
         raise SystemExit('EXE missing. Run python tools/build_workbench.py first, or use --build.')
     import pillow_heif
@@ -69,9 +70,9 @@ def package():
     if importlib.metadata.version('pillow-heif') != source_config['pillow-heif'] or heic != source_config['runtime']:
         raise RuntimeError('HEIC wheel changed. Review and update tools/heic_sources.json before distribution.')
     # Stage only explicit deliverables; never sweep personal drafts or old output into the ZIP.
-    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
+    output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='portable-', dir=ROOT / '.build') as temporary:
-        stage = Path(temporary) / 'InspectionWorkbench'
+        stage = Path(temporary) / name
         stage.mkdir()
         shutil.copyfile(exe, stage / exe.name)
         versions = copy_licenses(stage / 'LICENSES')
@@ -84,8 +85,8 @@ def package():
             shutil.copyfile(ROOT / file, source / file)
         source_tools = source / 'tools'
         source_tools.mkdir()
-        for name in ('build_workbench.py', 'package_workbench.py', 'distribution.py', 'smoke_frozen_workbench.py', 'validate_reports.ps1', 'heic_sources.json', 'build_common_word_library.mjs','test_draft_state.cjs','test_browser_workbench.cjs','browser_test_server.py','test_native_preview.py'):
-            shutil.copyfile(ROOT / 'tools' / name, source_tools / name)
+        for tool_name in ('build_workbench.py', 'package_workbench.py', 'distribution.py', 'prepare_english_assets.py', 'test_english_assets.py', 'smoke_frozen_workbench.py', 'validate_reports.ps1', 'heic_sources.json', 'build_common_word_library.mjs','test_draft_state.cjs','test_i18n.cjs','test_browser_workbench.cjs','browser_test_server.py','test_native_preview.py'):
+            shutil.copyfile(ROOT / 'tools' / tool_name, source_tools / tool_name)
         shutil.copytree(ROOT/'docs',source/'docs')
         shutil.copytree(stage / 'LICENSES', source / 'LICENSES')
         third = source / 'third_party'
@@ -100,15 +101,17 @@ def package():
         (third / 'sources.json').write_text(json.dumps(source_config, indent=2), encoding='utf-8')
         (source / 'BUILD.txt').write_text(
             'Windows x64, Python 3.12. Install requirements.txt in a virtual environment.\n'
-            'Run: python tools/package_workbench.py --build\n'
+            f'Run: python tools/package_workbench.py --build --edition {edition}\n'
             'Upstream HEIC sources and build recipes are in third_party/.\n'
             'Unmodified PyPI wheels are used. Templates and wording remain separate user data.\n', encoding='utf-8')
-        notices = {'application': VERSION, 'python': sys.version.split()[0], 'packages': versions, 'heic': heic}
+        notices = {'application': VERSION, 'edition':edition, 'python': sys.version.split()[0], 'packages': versions, 'heic': heic}
         (stage / 'THIRD_PARTY_NOTICES.txt').write_text(
             'Preserve LICENSES/ and source/ when redistributing this portable program.\n'
             'Application: GPL-2.0-or-later. Templates, wording and user reports retain their ownership.\n\n'
             + json.dumps(notices, indent=2), encoding='utf-8')
-        (stage / '使用说明.txt').write_text(
+        if edition=='english':
+            (stage/'README.txt').write_text((ROOT/'docs/README_EN.md').read_text(encoding='utf-8'),encoding='utf-8')
+        else:(stage / '使用说明.txt').write_text(
             f'检查报告工作台 {VERSION} · Windows 10/11 x64\n\n'
             '请先解压完整 ZIP，再双击 InspectionWorkbench.exe。首次启动需要几秒，会自动打开浏览器。\n'
             '无需安装 Python、Word 或照片编解码器；查看和编辑 DOCX 可使用 Word。\n\n'
@@ -128,27 +131,28 @@ def package():
             '发生多页面保存冲突时，可以另存副本或下载包含照片的当前修改备份，再加载最新草稿。\n'
             '从人员库切换到手动姓名会清除旧人员的资质与职位；既有报告快照不受人员库变更影响。\n\n'
             '分发给同事请保留 LICENSES 和 source；本 ZIP 不包含个人草稿或现场照片。\n', encoding='utf-8')
-        pending = ARCHIVE.with_suffix('.zip.tmp')
+        pending = archive_path.with_suffix('.zip.tmp')
         with zipfile.ZipFile(pending, 'w', zipfile.ZIP_DEFLATED) as archive:
             for file in sorted(stage.rglob('*')):
                 if file.is_file():
                     archive.write(file, file.relative_to(stage.parent).as_posix())
-        pending.replace(ARCHIVE)
-    checksum = hashlib.sha256(ARCHIVE.read_bytes()).hexdigest()
-    ARCHIVE.with_suffix('.zip.sha256').write_text(f'{checksum}  {ARCHIVE.name}\n', encoding='ascii')
-    print(f'Portable ZIP: {ARCHIVE} ({ARCHIVE.stat().st_size:,} bytes)')
-    return ARCHIVE
+        pending.replace(archive_path)
+    checksum = hashlib.sha256(archive_path.read_bytes()).hexdigest()
+    archive_path.with_suffix('.zip.sha256').write_text(f'{checksum}  {archive_path.name}\n', encoding='ascii')
+    print(f'Portable ZIP: {archive_path} ({archive_path.stat().st_size:,} bytes)')
+    return archive_path
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--build', action='store_true', help='Build the EXE, package and verify the final ZIP')
+    parser.add_argument('--edition',choices=['bilingual','english'],default='bilingual')
     args = parser.parse_args()
     if args.build:
-        subprocess.run([sys.executable, str(ROOT / 'tools/build_workbench.py')], check=True)
-    archive = package()
+        subprocess.run([sys.executable, str(ROOT / 'tools/build_workbench.py'),'--edition',args.edition], check=True)
+    archive = package(args.edition)
     if args.build:
-        subprocess.run([sys.executable, str(ROOT / 'tools/smoke_frozen_workbench.py'), '--zip', str(archive)], check=True)
+        subprocess.run([sys.executable, str(ROOT / 'tools/smoke_frozen_workbench.py'), '--zip', str(archive),'--edition',args.edition], check=True)
 
 
 if __name__ == '__main__':

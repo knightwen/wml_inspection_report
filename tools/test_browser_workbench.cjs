@@ -8,7 +8,7 @@ let browser,context,state,base,errors=[];
 const saved=page=>page.locator('#saveStatus').filter({hasText:'已保存到本地'}).waitFor();
 async function seedItem(page,text,fixture){
  await page.locator('#photoFiles').setInputFiles(fixture);await page.locator('#photoGrid img').first().waitFor();
- for(const [key,value] of Object.entries({element:'Columns',condition_rating:'5. Major deterioration',likelihood:'Likely',severity:'Significant',priority:'Critical'}))await page.locator('#rating_'+key).selectOption(value);
+ for(const [key,value] of Object.entries({element:'Columns',condition_rating:'5. Major deterioration',likelihood:'Likely',severity:'Severe',priority:'High'}))await page.locator('#rating_'+key).selectOption(value);
  await page.locator('#observationText').fill(text);await page.locator('#recommendationText').fill('Repair the recorded condition.');
 }
 (async()=>{
@@ -18,6 +18,9 @@ async function seedItem(page,text,fixture){
  browser=await chromium.launch({...(channel==='chromium'?{}:{channel}),headless:true});context=await browser.newContext({viewport:{width:1440,height:1000},acceptDownloads:true});
  context.on('page',p=>{p.setDefaultTimeout(12000);p.on('dialog',d=>d.accept());});const page=await context.newPage();page.on('pageerror',error=>errors.push(error.message));
  await page.goto(base+'/?key='+state.token);await saved(page);
+ await page.locator('#languageSelect').selectOption('en');await page.locator('#saveStatus').filter({hasText:'Saved locally'}).waitFor();assert.equal(await page.locator('html').getAttribute('lang'),'en-AU');
+ const bilingualText='Browser draft / 中文手动内容';await page.locator('#meta_site').fill(bilingualText);await page.locator('#languageSelect').selectOption('zh');await saved(page);assert.equal(await page.locator('#meta_site').inputValue(),bilingualText);
+ assert.equal(await page.locator('html').getAttribute('lang'),'zh-CN');
  await page.locator('#meta_site').fill('Browser Regression');await page.locator('#meta_report_number').fill('QA-BROWSER');await page.locator('#meta_project_number').fill('QA');await saved(page);
 
  for(const key of ['introduction','remedial_works','conclusion','cost_estimate'])await page.locator('#section_'+key).fill(key+' paragraph one.\n\nSecond paragraph.');

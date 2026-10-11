@@ -154,25 +154,20 @@
     "N/A"
   ],
   "likelihood": [
-    "Likely",
-    "Possible",
     "Unlikely",
-    "Very likely",
-    "Very unlikely"
+    "Possible",
+    "Likely"
   ],
   "severity": [
-    "Critical",
+    "Negligible",
     "Minor",
     "Moderate",
-    "Negligible",
-    "Severe",
-    "Significant"
+    "Severe"
   ],
   "priority": [
-    "Critical",
-    "High",
     "Low",
     "Moderate",
+    "High",
     "Urgent"
   ]
 }

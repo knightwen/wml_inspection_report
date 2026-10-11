@@ -24,7 +24,8 @@ small{font-size:var(--font-note)}
 .brand small{display:block;color:var(--muted)}
 .local{margin-left:14px;font-size:var(--font-note);background:var(--soft);padding:5px 10px;border-radius:20px;white-space:nowrap}
 .local i{background:#7eaa6c;width:6px;height:6px;border-radius:50%;display:inline-block;margin-right:5px}
-.top-actions{display:flex;align-items:center;gap:10px}
+.top-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;max-width:100%}
+#languageSelect{width:auto;flex-shrink:0;padding:7px 9px;font-size:var(--font-control)}
 #saveStatus{font-size:var(--font-note);color:var(--muted)}
 #saveStatus.error{color:var(--danger)}
 main{max-width:1510px;margin:auto;padding:27px 32px 20px}
