@@ -1,4 +1,6 @@
 """Generate reports by cloning the retained Word template's OOXML components."""
+from costs import amount, validate_rows
+from decimal import Decimal
 from copy import deepcopy
 from datetime import date, datetime, timezone
 from io import BytesIO
@@ -291,6 +293,52 @@ def image_paragraph(rid, size, number, filename, width_twips):
     E.SubElement(E.SubElement(sp,'{'+a+'}prstGeom',prst='rect'),'{'+a+'}avLst')
     return p
 
+def fill_report_sections(body, sections):
+    """Fill direct body anchors without altering headings, tables or section geometry."""
+    labels={'introduction':'introduction','remedial_works':'recommended remedial works',
+            'conclusion':'conclusion','cost_estimate':'cost estimate'}
+    for key,label in labels.items():
+        text=sections.get(key,'')
+        if not text.strip():continue
+        heading=next((p for p in body.findall('w:p',NS)
+                      if ''.join(p.xpath('.//w:t/text()',namespaces=NS)).strip().casefold()==label),None)
+        if heading is None:raise ValueError('Word 模板缺少章节：'+label)
+        following=heading.getnext()
+        blank=following is not None and following.tag==q('p') and not following.xpath('.//w:t | .//w:drawing | ./w:pPr/w:sectPr',namespaces=NS)
+        prototype=deepcopy(following) if blank else paragraph()
+        scrub_ids(prototype)
+        index=body.index(heading)+1
+        if blank:body.remove(following)
+        for line in text.replace('\r\n','\n').replace('\r','\n').split('\n'):
+            p=deepcopy(prototype);set_text(p,line)
+            body.insert(index,p);index+=1
+
+def fill_cost_table(body, rows):
+    if not rows:return
+    validate_rows(rows)
+    table=next((t for t in body.findall('w:tbl',NS) if 'COST ESTIMATE' in ''.join(t.xpath('./w:tr[1]//w:t/text()',namespaces=NS)).upper()),None)
+    if table is None:raise ValueError('Word 模板缺少费用表')
+    original=table.findall('w:tr',NS);prototype=deepcopy(original[2]);scrub_ids(prototype)
+    for row in original[2:]:table.remove(row)
+    for row in original[:2]:
+        pr=row.find('w:trPr',NS)
+        if pr is None:pr=E.Element(q('trPr'));row.insert(0,pr)
+        child(pr,'tblHeader')
+    total=Decimal('0');complete=True
+    for index,data in enumerate(rows,1):
+        value=amount(data)
+        if value is None:complete=False
+        else:total+=value
+        row=deepcopy(prototype)
+        values=[str(index),data['description'],data['quantity'],data['unit'],data['rate'],format(value,',.2f') if value is not None else '',data['priority']]
+        for cell,text in zip(row.findall('w:tc',NS),values):
+            set_text(cell,text)
+        for height in row.xpath('./w:trPr/w:trHeight',namespaces=NS):height.getparent().remove(height)
+        table.append(row)
+    row=deepcopy(prototype)
+    for cell,text in zip(row.findall('w:tc',NS),['','TOTAL' if complete else 'SUBTOTAL (incomplete estimate)','','','',format(total,',.2f'),'']):set_text(cell,text)
+    table.append(row)
+
 def generate_report(template, project, photo_path, target):
     with zipfile.ZipFile(template) as z: parts={n:z.read(n) for n in z.namelist()}
     values=metadata_values(project['metadata'])
@@ -302,6 +350,8 @@ def generate_report(template, project, photo_path, target):
                     t.text=re.sub(r'\{\{(\w+)\}\}',lambda m:values.get(m[1],''),t.text)
             parts[name]=xml(node)
     doc=E.fromstring(parts['word/document.xml']);body=doc.find('w:body',NS)
+    fill_report_sections(body,project.get('sections',{}))
+    fill_cost_table(body,project.get('cost_rows',[]))
     slot=body.xpath('./w:tbl[w:tblPr/w:tblCaption/@w:val="InspectionItems"]',namespaces=NS)[0]
     prototype=deepcopy(slot); at=body.index(slot);body.remove(slot)
     relations=E.fromstring(parts['word/_rels/document.xml.rels'])

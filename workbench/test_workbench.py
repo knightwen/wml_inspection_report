@@ -20,20 +20,155 @@ class WorkbenchTests(unittest.TestCase):
         QA.mkdir(parents=True,exist_ok=True)
         self.tmp=tempfile.TemporaryDirectory(dir=QA);self.store=Store(self.tmp.name);self.project=self.store.new()
 
-    def tearDown(self):self.tmp.cleanup()
+    def tearDown(self):self.store.previews.close();self.tmp.cleanup()
+
+    def test_cost_rows_decimal_export_and_backup(self):
+        from costs import amount
+        rows=[{'description':'Repair steel','quantity':'3','unit':'each','rate':'0.335','priority':'High'},{'description':'Clean','quantity':'2.5','unit':'m2','rate':'100','priority':'Low'}]
+        self.assertEqual(str(amount(rows[0])),'1.01')
+        self.project['cost_rows']=rows
+        self.project['items']=[self.item([self.store.upload(image_bytes(),'costs.jpg')])]
+        self.project['metadata'].update(site='Costs QA',report_number='QA-COSTS',project_number='QA')
+        saved=self.store.save(self.project)
+        self.assertEqual(self.store.restore(self.store.backup(saved['id']))['cost_rows'],rows)
+        exported=self.store.export(saved['id'])
+        with zipfile.ZipFile(self.store.path/'exports'/(exported['id']+'.docx')) as z:
+            doc=E.fromstring(z.read('word/document.xml'))
+            self.assertIn('251.01',doc.xpath('//w:t/text()',namespaces=NS))
+            self.assertIn('Repair steel',doc.xpath('//w:t/text()',namespaces=NS))
+        for value in ['-1','NaN','Infinity','1000000001','0.0000001']:
+            saved['cost_rows'][0]['rate']=value
+            with self.assertRaises(ValueError):self.store.save(saved)
+
+    def test_sections_save_copy_backup_and_word(self):
+        text={key:key+' first paragraph.\n\nSecond paragraph.' for key in ['introduction','remedial_works','conclusion','cost_estimate']}
+        self.project['sections']=text.copy()
+        photo=self.store.upload(image_bytes(),'sections.jpg');self.project['items']=[self.item([photo])]
+        self.project['metadata'].update(site='Sections QA',report_number='QA-SECTIONS',project_number='QA')
+        saved=self.store.save(self.project)
+        self.assertEqual(self.store.load(saved['id'])['sections'],text)
+        self.assertEqual(self.store.copy_project(saved)['sections'],text)
+        self.assertEqual(self.store.restore(self.store.backup(saved['id']))['sections'],text)
+        exported=self.store.export(saved['id'])
+        with zipfile.ZipFile(self.store.path/'exports'/(exported['id']+'.docx')) as z, zipfile.ZipFile(RESOURCES/'report_template.docx') as template:
+            body=E.fromstring(z.read('word/document.xml')).find('w:body',NS)
+            original=E.fromstring(template.read('word/document.xml')).find('w:body',NS)
+            for key,label in [('introduction','introduction'),('remedial_works','recommended remedial works'),('conclusion','conclusion'),('cost_estimate','cost estimate')]:
+                anchor=next(p for p in body.findall('w:p',NS) if ''.join(p.xpath('.//w:t/text()',namespaces=NS)).strip().casefold()==label)
+                source=next(p for p in original.findall('w:p',NS) if ''.join(p.xpath('.//w:t/text()',namespaces=NS)).strip().casefold()==label)
+                self.assertEqual(E.tostring(anchor),E.tostring(source))
+                self.assertEqual(''.join(anchor.getnext().xpath('.//w:t/text()',namespaces=NS)),key+' first paragraph.')
+            self.assertEqual(z.read('word/styles.xml'),template.read('word/styles.xml'))
+            self.assertEqual(E.tostring(body.find('w:sectPr',NS)),E.tostring(original.find('w:sectPr',NS)))
+
+    def test_legacy_sections_and_validation(self):
+        self.project.pop('sections');path=self.store.path_for_project(self.project['id']);atomic_json(path,self.project)
+        before=path.read_bytes();self.assertEqual(self.store.load(self.project['id'])['sections']['introduction'],'');self.assertEqual(path.read_bytes(),before)
+        for value in [None,[],{'introduction':1},{'introduction':'x'*60001}]:
+            self.project['sections']=value
+            with self.assertRaises(ValueError):self.store.save(self.project)
 
     def test_preview_conversion_failure_preserves_draft(self):
-        import subprocess
+        from preview import PreviewManager
+        import time
         photo=self.store.upload(image_bytes(),'preview.jpg')
         self.project['items']=[self.item([photo])]
         self.project['metadata'].update(site='Preview',report_number='PREVIEW',project_number='TEST')
         saved=self.store.save(self.project)
         before=self.store.path_for_project(saved['id']).read_bytes()
-        with patch('app.subprocess.run',side_effect=subprocess.TimeoutExpired('powershell',120)):
-            with self.assertRaisesRegex(ValueError,'超时'):self.store.preview(saved['id'])
-        with patch('app.subprocess.run',return_value=subprocess.CompletedProcess([],1,stderr=b'Word unavailable')):
-            with self.assertRaisesRegex(ValueError,'Microsoft Word'):self.store.preview(saved['id'])
+        for message in ['转换超时','Microsoft Word 不可用']:
+            def failing(*args):raise ValueError(message)
+            manager=PreviewManager(self.store,RESOURCES,converter=failing,capability=lambda:{'available':True})
+            job=manager.start(self.store.report_snapshot(saved['id']))
+            for _ in range(200):
+                state=manager.get(job['id'])
+                if state['status']=='failed':break
+                time.sleep(.01)
+            self.assertEqual(state['status'],'failed');self.assertIn(message,state['error']);manager.close()
         self.assertEqual(before,self.store.path_for_project(saved['id']).read_bytes())
+
+    def test_manual_person_does_not_inherit_qualifications(self):
+        person=self.store.personnel['people'][0]
+        self.project['metadata'].update(prepared_by='Selected Person',prepared_by_id=person['id'],author_qualifications='OLD QUALIFICATION',author_title='OLD TITLE',site='Manual person',report_number='QA-PERSON',project_number='QA')
+        photo=self.store.upload(image_bytes(),'person.jpg');self.project['items']=[self.item([photo])]
+        saved=self.store.save(self.project);edited=json.loads(json.dumps(saved))
+        edited['metadata'].update(prepared_by='Manual Person',prepared_by_id='')
+        saved=self.store.save(edited)
+        self.assertEqual(saved['metadata']['author_qualifications'],'');self.assertEqual(saved['metadata']['author_title'],'')
+        export=self.store.export(saved['id'])
+        with zipfile.ZipFile(self.store.path/'exports'/(export['id']+'.docx')) as z:
+            text=z.read('word/document.xml').decode()
+        self.assertIn('Manual Person',text);self.assertNotIn('OLD QUALIFICATION',text);self.assertNotIn('OLD TITLE',text)
+        self.assertEqual(self.store.personnel['people'][0],person)
+
+    def test_conflict_copy_and_unsaved_backup_preserve_all_edits(self):
+        from app import RevisionConflict
+        photo=self.store.upload(image_bytes(),'conflict.jpg');self.project['items']=[self.item([photo])]
+        saved=self.store.save(self.project);local=json.loads(json.dumps(saved));remote=json.loads(json.dumps(saved))
+        remote['metadata']['site']='Remote saved';self.store.save(remote)
+        local['metadata']['site']='Local unsaved';local['editor']['observation']='Pending editor text';local['items'][0]['observation']='Changed item'
+        with self.assertRaises(RevisionConflict):self.store.save(local)
+        copied=self.store.copy_project(local)
+        self.assertNotEqual(copied['id'],local['id']);self.assertEqual(copied['revision'],0)
+        self.assertEqual(self.store.load(local['id'])['metadata']['site'],'Remote saved')
+        restored=self.store.restore(self.store.backup_snapshot(local))
+        self.assertEqual(restored['metadata']['site'],'Local unsaved');self.assertEqual(restored['editor']['observation'],'Pending editor text')
+        self.assertEqual(restored['items'][0]['observation'],'Changed item')
+        with Image.open(self.store.photo_path(restored['items'][0]['photos'][0]['id'])) as image:self.assertEqual(image.size,(800,600))
+
+    def test_preview_snapshot_does_not_block_save(self):
+        from preview import PreviewManager
+        import threading,time
+        entered=threading.Event();release=threading.Event()
+        def converter(source,resources,cancel):
+            entered.set();release.wait(3);pdf=source.with_suffix('.pdf');pdf.write_bytes(b'%PDF-test');return pdf
+        def renderer(pdf,source,progress,cancel):progress(1,2);progress(2,2);return 2
+        manager=PreviewManager(self.store,RESOURCES,converter=converter,renderer=renderer,capability=lambda:{'available':True})
+        photo=self.store.upload(image_bytes(),'snapshot.jpg');self.project['items']=[self.item([photo])]
+        self.project['metadata'].update(site='Before preview',report_number='SNAPSHOT',project_number='QA');saved=self.store.save(self.project)
+        job=manager.start(self.store.report_snapshot(saved['id']));self.assertTrue(entered.wait(3))
+        try:
+            start=time.monotonic();saved['metadata']['site']='After preview';self.store.save(saved)
+            self.assertLess(time.monotonic()-start,.5)
+            self.assertEqual(manager.get(job['id'])['status'],'converting')
+        finally:release.set()
+        for _ in range(200):
+            result=manager.get(job['id'])
+            if result['status'] in ['ready','failed']:break
+            time.sleep(.01)
+        self.assertEqual(result['status'],'ready');self.assertEqual(result['pages'],2)
+        with zipfile.ZipFile(self.store.path/'exports'/(result['report_id']+'.docx')) as z:text=z.read('word/document.xml').decode()
+        self.assertIn('Before preview',text);self.assertNotIn('After preview',text);manager.close()
+
+    def test_no_word_preview_still_allows_docx(self):
+        from preview import PreviewManager
+        photo=self.store.upload(image_bytes(),'no-word.jpg');self.project['items']=[self.item([photo])]
+        self.project['metadata'].update(site='No Word',report_number='NOWORD',project_number='QA');self.store.save(self.project)
+        manager=PreviewManager(self.store,RESOURCES,capability=lambda:{'available':False,'reason':'Microsoft Word not installed'})
+        with self.assertRaisesRegex(ValueError,'not installed'):manager.start(self.store.report_snapshot(self.project['id']))
+        self.assertTrue((self.store.path/'exports'/(self.store.export(self.project['id'])['id']+'.docx')).exists())
+
+    def test_conversion_timeout_cleans_only_owned_session(self):
+        from preview import convert_word_pdf
+        import threading
+        process=unittest.mock.Mock();process.poll.side_effect=[None,0];process.communicate.return_value=(b'',b'')
+        with patch('preview.subprocess.Popen',return_value=process),patch('preview.cleanup_owned_word') as cleanup:
+            with self.assertRaisesRegex(ValueError,'超时'):convert_word_pdf(self.store.path/'timeout.docx',RESOURCES,threading.Event(),timeout=-1)
+        process.kill.assert_called_once();cleanup.assert_called_once_with(self.store.path/'timeout.word-owner.json')
+
+    def test_word_cleanup_checks_ownership_process_identity_and_creation_time(self):
+        from preview import cleanup_owned_word
+        owner=self.store.path/'owned-session.json'
+        for owned,created,image,terminate in [(True,123,'WINWORD.EXE',True),(True,456,'WINWORD.EXE',False),(True,123,'other.exe',False),(False,123,'WINWORD.EXE',False)]:
+            owner.write_text(json.dumps({'owned':owned,'pid':42,'creation_time':'123'}),encoding='utf-8')
+            kernel=unittest.mock.Mock();kernel.OpenProcess.return_value=99
+            def get_times(handle,creation,*args):creation._obj.value=created;return True
+            def get_name(handle,flags,name,size):name.value='C:/Program Files/'+image;return True
+            kernel.GetProcessTimes.side_effect=get_times;kernel.QueryFullProcessImageNameW.side_effect=get_name
+            with patch('preview.ctypes.WinDLL',return_value=kernel) as library:cleanup_owned_word(owner)
+            self.assertEqual(kernel.TerminateProcess.called,terminate)
+            if owned:kernel.CloseHandle.assert_called_once_with(99)
+            else:library.assert_not_called()
 
     def item(self,photos):
         return {'id':secrets.token_hex(16),'photos':photos,'element':'Columns','condition_rating':'5. Major deterioration',

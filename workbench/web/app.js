@@ -1,10 +1,11 @@
 'use strict';
 const $=id=>document.getElementById(id);
 const fields=['element','condition_rating','likelihood','severity','priority'];
+const sectionLabels={introduction:'Introduction · 项目介绍',remedial_works:'Recommended Remedial Works · 修复工程建议',conclusion:'Conclusion · 结论',cost_estimate:'Cost Estimate · 费用估算说明'};
 const labels={element:'Element · 构件',condition_rating:'Condition Rating · 状况',likelihood:'Likelihood · 可能性',severity:'Severity · 严重程度',priority:'Priority · 优先级'};
 const metadataLabels={site:'地点 / 资产名称 *',client:'客户',report_number:'报告编号 *',project_number:'项目编号 *',revision:'Revision',report_date:'报告日期',purpose:'Purpose of issue',issued_to:'Issued to',document_name:'文档名称（留空自动生成）',prepared_by:'Prepared by',reviewed_by:'Reviewed by'};
 const personRoles={prepared_by:{role:'author',label:'作者 / Prepared by',prefix:'author'},reviewed_by:{role:'reviewer',label:'审阅者 / Reviewed by',prefix:'reviewer'}};
-let boot,project=null,busy=false,saveTimer,toastTimer,queue=Promise.resolve(),saveFailed=false;
+let boot,project=null,busy=false,toastTimer,saver,previewJob=null,previewTimer;
 let personnelEditorId=null,personnelDirty=false;
 let itemDrag=null;
 let photoEditor=null;
@@ -15,29 +16,42 @@ function status(text,error=false){$('saveStatus').textContent=text;$('saveStatus
 async function api(path,body,headers={}){
  const opts={headers:{'X-Workbench':'1',...headers}};
  if(body!==undefined){opts.method='POST';if(body instanceof Blob){opts.body=body;}else{opts.headers['Content-Type']='application/json';opts.body=JSON.stringify(body);}}
- const r=await fetch(path,opts);const data=await r.json();if(!r.ok)throw new Error(data.error||'操作失败');return data;
+ const r=await fetch(path,opts);const data=await r.json();if(!r.ok){const error=new Error(data.error||'操作失败');error.code=data.code;throw error;}return data;
 }
-function scheduleSave(){status('有更改，正在保存…');clearTimeout(saveTimer);saveTimer=setTimeout(()=>persist().catch(()=>{}),650);}
-function persist(){
- clearTimeout(saveTimer);saveTimer=null;if(!project)return Promise.resolve();
- const snapshot=structuredClone(project);
- const task=queue.catch(()=>{}).then(async()=>{
-  snapshot.revision=project.revision;
-  const saved=await api('/api/save',snapshot);if(project.id===saved.id){project.revision=saved.revision;project.updated=saved.updated;}
-  const entry={id:saved.id,site:saved.metadata.site,report_number:saved.metadata.report_number,updated:saved.updated,count:saved.items.length};
-  const position=boot.projects.findIndex(p=>p.id===saved.id);if(position>=0)boot.projects[position]=entry;else boot.projects.unshift(entry);renderProjects();
-  saveFailed=false;status('已保存到本地');return saved;
- }).catch(e=>{saveFailed=true;status('保存失败，请重试',true);toast(e.message);throw e;});
- queue=task;return task;
+function saveStatus(state){
+ if(state.conflict)status('保存冲突：当前修改尚未保存，请保留副本',true);
+ else if(state.sending)status('正在保存，请勿关闭页面…');
+ else if(state.pending)status('等待保存，请勿关闭页面…');
+ else if(state.error)status('保存失败，修改保留在当前页面',true);
+ else if(state.changed>state.saved)status('有未保存更改…');else status('已保存到本地');
+ $('retrySave').hidden=!state.error||!!state.conflict;$('resolveConflict').hidden=!state.conflict;
 }
-async function flush(){clearTimeout(saveTimer);saveTimer=null;await persist();}
-function setBusy(value){busy=value;for(const id of ['newProject','projectSelect','saveItem','previewButton','generateButton','backupButton','restoreButton','resetEditor','exitButton','libraryButton','managePersonnel','savePersonnel','deletePersonnel','newPersonnel','closePersonnel'])if($(id))$(id).disabled=value;if($('reportSummary'))updateSummary();if(photoEditor)renderPhotoEditor();}
+function scheduleSave(){saver.schedule();}
+function persist(){return saver.save(true);}
+async function flush(){await saver.flush();}
+function openSaveConflict(){if(!$('saveConflictDialog').open)$('saveConflictDialog').showModal();}
+async function recoverConflict(loadLatest=false){
+ await saver.queue;const previousId=project.id;const copy=await api('/api/project-copy',structuredClone(project));
+ boot.projects=(await api('/api/bootstrap')).projects;loadProject(loadLatest?await api('/api/project?id='+previousId):copy);
+ localStorage.setItem('lastProject',project.id);$('saveConflictDialog').close();toast(loadLatest?'你的修改已保存为独立副本，已加载原草稿最新版本。':'你的修改已保存为独立副本。');
+}
+async function downloadRecovery(){
+ const response=await fetch('/api/recovery-backup',{method:'POST',headers:{'X-Workbench':'1','Content-Type':'application/json'},body:JSON.stringify(project)});
+ if(!response.ok)throw new Error((await response.json()).error);
+ const url=URL.createObjectURL(await response.blob()),a=node('a');a.href=url;a.download='unsaved-draft.inspection.zip';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('当前修改与照片已下载；完成冲突处理前，请保留当前页面。');
+}
+function setBusy(value){busy=value;for(const id of ['newProject','projectSelect','saveSections','saveItem','previewButton','generateButton','backupButton','restoreButton','resetEditor','exitButton','libraryButton','managePersonnel','savePersonnel','deletePersonnel','newPersonnel','closePersonnel'])if($(id))$(id).disabled=value;if($('reportSummary'))updateSummary();if(photoEditor)renderPhotoEditor();}
 function action(fn){return async event=>{if(busy)return;setBusy(true);try{await fn(event);}catch(e){toast(e.message);}finally{setBusy(false);}};}
 function confirmAction(title,text){
  $('confirmTitle').textContent=title;$('confirmText').textContent=text;const d=$('confirmDialog');d.showModal();
  return new Promise(resolve=>{const close=value=>{d.close();$('confirmOk').onclick=null;$('confirmCancel').onclick=null;d.oncancel=null;resolve(value);};$('confirmOk').onclick=()=>close(true);$('confirmCancel').onclick=()=>close(false);d.oncancel=e=>{e.preventDefault();close(false);};});
 }
 function buildFields(){
+ for(const [key,label] of Object.entries(sectionLabels)){
+  const box=node('label',label,'section-field'),input=node('textarea');input.id='section_'+key;input.maxLength=60000;input.rows=6;input.spellcheck=true;
+  input.placeholder=key==='cost_estimate'?'填写估算依据、排除项、预算说明或限制条件。':'输入正文；换行分段。留空则保留空白模板。';
+  input.addEventListener('input',()=>{project.sections[key]=input.value;scheduleSave();});box.append(input);if(key==='cost_estimate'){const wrapper=node('div',undefined,'cost-editor');wrapper.append(box);const scroll=node('div',undefined,'cost-table-scroll');scroll.innerHTML='<table class=cost-table><thead><tr><th>Item</th><th>Description</th><th>Quantity</th><th>Unit</th><th>Rate</th><th>Cost</th><th>Priority</th><th>操作</th></tr></thead><tbody id=costRows></tbody></table>';wrapper.append(scroll);const footer=node('div',undefined,'cost-footer');const add=node('button','＋ 新增费用项');add.id='addCostRow';add.type='button';add.onclick=()=>{project.cost_rows.push({description:'',quantity:'',unit:'',rate:'',priority:''});renderCosts();scheduleSave();};const total=node('strong');total.id='costTotal';total.setAttribute('aria-live','polite');footer.append(add,total);wrapper.append(footer);$('sectionFields').append(wrapper);}else $('sectionFields').append(box);
+ }
  for(const [key,label] of Object.entries(metadataLabels)){
   if(personRoles[key]){buildPersonField(key);continue;}
   const box=node('label',label);const input=node('input');input.id='meta_'+key;input.type=key==='report_date'?'date':'text';input.maxLength=500;
@@ -69,13 +83,35 @@ function buildFields(){
   $(key+'Text').addEventListener('input',()=>{project.editor[key]=$(key+'Text').value;scheduleSave();});
  }
 }
+function costValue(row){
+ if(row.quantity.trim()===''||row.rate.trim()==='')return null;
+ const parse=text=>{if(!/^(?:[0-9]+(?:\.[0-9]{0,6})?|\.[0-9]{1,6})$/.test(text.trim()))return null;const [whole,fraction='']=text.trim().split('.');return BigInt(whole)*1000000n+BigInt(fraction.padEnd(6,'0'));};
+ const qty=parse(row.quantity),rate=parse(row.rate);if(qty===null||rate===null)return null;
+ return (qty*rate+5000000000n)/10000000000n;
+}
+function money(cents){return (cents/100n).toLocaleString('en-AU')+'.'+(cents%100n).toString().padStart(2,'0');}
+function updateCostTotal(){let total=0n,complete=true;project.cost_rows.forEach((row,index)=>{const value=costValue(row);if(value===null)complete=false;else total+=value;const cell=$('costValue_'+index);if(cell)cell.textContent=value===null?'—':money(value);});$('costTotal').textContent=(complete?'Total · 合计：':'Subtotal · 已填写项小计：')+money(total);}
+function renderCosts(){
+ const body=$('costRows');body.replaceChildren();
+ project.cost_rows.forEach((row,index)=>{
+  const tr=node('tr');tr.append(node('td',String(index+1)));
+  for(const key of ['description','quantity','unit','rate','priority']){
+   const cell=node('td'),input=node(key==='priority'?'select':key==='description'?'textarea':'input');input.setAttribute('aria-label',`费用项 ${index+1} ${key}`);
+   if(key==='priority'){for(const value of ['','Urgent','Critical','High','Moderate','Low']){const option=node('option',value||'请选择');option.value=value;input.append(option);}}
+   else {input.maxLength=key==='description'?5000:100;if(['quantity','rate'].includes(key))input.inputMode='decimal';}
+   input.value=row[key]||'';input.addEventListener(key==='priority'?'change':'input',()=>{row[key]=input.value;updateCostTotal();scheduleSave();});cell.append(input);tr.append(cell);
+   if(key==='rate'){const value=node('td');value.id='costValue_'+index;value.className='cost-money';tr.append(value);}
+  }
+  const cell=node('td'),remove=node('button','删除');remove.type='button';remove.setAttribute('aria-label',`删除费用项 ${index+1}`);remove.onclick=async()=>{if(await confirmAction('删除费用项','确认删除这条费用记录？')){project.cost_rows.splice(index,1);renderCosts();scheduleSave();}};cell.append(remove);tr.append(cell);body.append(tr);
+ });updateCostTotal();
+}
 function buildPersonField(key){
  const box=node('div',undefined,'person-field');const label=node('label',personRoles[key].label);label.htmlFor='meta_'+key;
  const select=node('select');select.id='meta_'+key;
  const manual=node('input');manual.id='manual_'+key;manual.maxLength=500;manual.placeholder='手动填写姓名';manual.setAttribute('aria-label',personRoles[key].label+'姓名');manual.hidden=true;
  const details=node('p',undefined,'person-details');details.id='details_'+key;details.setAttribute('aria-live','polite');
  select.addEventListener('change',()=>{
-  if(select.value==='__manual__'){manual.hidden=false;project.metadata[key+'_id']='';manual.value=project.metadata[key]||'';manual.focus();}
+  if(select.value==='__manual__'){manual.hidden=false;WorkbenchState.manualPerson(project.metadata,key,personRoles[key].prefix);manual.value=project.metadata[key]||'';manual.focus();}
   else {
    const person=boot.personnel.people.find(p=>p.id===select.value),prefix=personRoles[key].prefix;
    project.metadata[key]=person?.name||'';project.metadata[key+'_id']=person?.id||'';
@@ -85,7 +121,7 @@ function buildPersonField(key){
   renderPersonDetails(key);
   scheduleSave();
  });
- manual.addEventListener('input',()=>{project.metadata[key]=manual.value;project.metadata[key+'_id']='';renderPersonDetails(key);scheduleSave();});
+ manual.addEventListener('input',()=>{project.metadata[key]=manual.value;WorkbenchState.manualPerson(project.metadata,key,personRoles[key].prefix);renderPersonDetails(key);scheduleSave();});
  box.append(label,select,manual,details);$('metadataFields').append(box);
 }
 function renderPersonDetails(key){
@@ -162,7 +198,7 @@ function updateSummary(){
  if(!project)return;
  const count=project.items.length,photos=project.items.reduce((n,i)=>n+i.photos.length,0);
  $('itemCount').textContent=count;$('reportSummary').textContent=count?`${count} 个检查项 · ${photos} 张照片`:'还没有已保存的检查项';
- $('generateButton').disabled=busy||count===0;$('previewButton').disabled=busy||count===0;
+ $('generateButton').disabled=busy||count===0;$('previewButton').disabled=busy||count===0;$('previewButton').textContent=previewJob?'查看预览进度 / 结果':'预览报告';
 }
 function renderProjects(){
  const select=$('projectSelect');select.replaceChildren();
@@ -327,7 +363,7 @@ function setupPhotoEditor(){
   if(project.id!==edit.projectId||project.editor.photos[edit.index]?.id!==edit.photoId)throw new Error('照片已改变，请重新打开编辑窗口');
   const saved=await api('/api/photo-edit',{id:edit.photoId,operations:edit.operations});
   const previous=project.editor.photos[edit.index];project.editor.photos[edit.index]={...previous,...saved};
-  try{await flush();}catch(error){project.editor.photos[edit.index]=previous;throw error;}
+  try{await flush();}catch(error){if(error.code!=='revision_conflict')project.editor.photos[edit.index]=previous;throw error;}
   $('photoEditorDialog').close();photoEditor=null;renderPhotos();toast('照片已保存；点击 Save 将修改加入检查项。');
  });
 }
@@ -378,7 +414,7 @@ async function moveItem(id,targetId,after=false){
  if(from<0||target<0||from===target)return;
  let to=target+(after?1:0);if(from<to)to--;if(from===to)return;
  const previous=[...project.items];const [item]=project.items.splice(from,1);project.items.splice(to,0,item);renderItems();
- try{await flush();}catch(error){project.items=previous;renderItems();throw error;}
+ try{await flush();}catch(error){if(error.code!=='revision_conflict')project.items=previous;renderItems();throw error;}
 }
 function renderItems(){
  clearItemDrag();
@@ -423,7 +459,7 @@ function renderItems(){
  });updateSummary();updateEditorTitle();
 }
 function editorHasContent(){return project.editor.photos.length||project.editor.observation||project.editor.recommendation;}
-function loadProject(value){project=value;for(const key of Object.keys(metadataLabels))if(!personRoles[key])$('meta_'+key).value=project.metadata[key]||'';renderPersonChoices();updateTitle();renderEditor();renderItems();renderProjects();status('已保存到本地');}
+function loadProject(value){project=value;project.sections??={};project.cost_rows??=[];renderCosts();saver.reset(value.revision);for(const key of Object.keys(sectionLabels))$('section_'+key).value=project.sections[key]||'';for(const key of Object.keys(metadataLabels))if(!personRoles[key])$('meta_'+key).value=project.metadata[key]||'';renderPersonChoices();updateTitle();renderEditor();renderItems();renderProjects();}
 async function uploadPhotos(files){
  if(!files.length)return;if(project.editor.photos.length+files.length>100)throw new Error('一个检查项最多 100 张照片');
  const failures=[];
@@ -446,12 +482,47 @@ async function saveItem(){
  const previous=structuredClone(project.editor);const previousId=project.editor_id;
  project.editor=blankEditor();project.editor_id=null;
  try{await flush();renderItems();renderEditor();toast(index>=0?'检查项修改已保存':'检查项已保存，可以继续下一项');}
- catch(error){project.editor=previous;project.editor_id=previousId;if(index<0)project.items.pop();else project.items[index]=previousItem;throw error;}
+ catch(error){if(error.code!=='revision_conflict'){project.editor=previous;project.editor_id=previousId;if(index<0)project.items.pop();else project.items[index]=previousItem;}renderItems();renderEditor();throw error;}
+}
+async function beginPreview(){
+ if(previewJob){if(!$('reportPreviewDialog').open)$('reportPreviewDialog').showModal();await pollPreview();return;}
+ await flush();if(editorHasContent()&&!(await confirmAction('预览已保存的检查项','当前编辑区还有内容。预览只包含已保存检查项；若要包含当前项，请取消后点击 Save。')))return;
+ clearTimeout(previewTimer);$('reportPreviewPages').replaceChildren();$('previewDownloads').hidden=true;$('retryPreview').hidden=true;
+ if(!$('reportPreviewDialog').open)$('reportPreviewDialog').showModal();$('previewProgress').textContent='正在提交报告快照…';
+ try{previewJob=await api('/api/preview',{id:project.id});updateSummary();await pollPreview();}
+ catch(error){previewJob=null;$('previewProgress').textContent=error.message;$('retryPreview').hidden=false;updateSummary();}
+}
+async function pollPreview(){
+ if(!previewJob)return;
+ try{
+  const result=await api('/api/preview-job?id='+previewJob.id);previewJob=result;$('previewProgress').textContent=result.message;
+  $('previewSnapshot').textContent=`${result.site} · 草稿版本 ${result.project_revision}（后续编辑不会改变此份预览）`;
+  if(result.status==='failed')throw new Error(result.error);
+  if(result.status==='ready'){
+   $('reportPreviewPages').replaceChildren();
+   for(let page=1;page<=result.pages;page++){
+    const sheet=node('figure'),image=node('img');image.src='/api/preview-page?id='+result.report_id+'&page='+page;image.alt='报告第 '+page+' 页';image.loading='lazy';sheet.append(image,node('figcaption','第 '+page+' / '+result.pages+' 页'));$('reportPreviewPages').append(sheet);
+   }
+   $('openPreviewPdf').href='/api/preview-pdf?id='+result.report_id;$('downloadPreviewWord').href='/api/download?id='+result.report_id+'&name='+encodeURIComponent(result.name);$('downloadPreviewWord').download=result.name;
+   $('previewDownloads').hidden=false;$('retryPreview').hidden=false;$('retryPreview').textContent='重新预览已保存报告';updateSummary();return;
+  }
+  previewTimer=setTimeout(pollPreview,600);
+ }catch(error){previewJob=null;$('previewProgress').textContent=error.message;$('retryPreview').hidden=false;updateSummary();}
 }
 async function init(){
  boot=await api('/api/bootstrap');buildFields();setupPhotoEditor();$('dataFolder').textContent='数据目录：'+boot.data_folder;
  window.addEventListener('blur',clearItemDrag);window.addEventListener('resize',clearItemDrag);
- $('appVersion').textContent='Version '+boot.version+' · 无需登录 · 离线使用';
+ $('appVersion').textContent='Version '+boot.version+' · 本地开发预览 · 无需登录';
+ saver=new WorkbenchState.DraftSaver({snapshot:()=>project,send:snapshot=>api('/api/save',snapshot),onChange:saveStatus,onConflict:openSaveConflict,onSaved:saved=>{
+  if(project.id===saved.id){project.revision=saved.revision;project.updated=saved.updated;}
+  const entry={id:saved.id,site:saved.metadata.site,report_number:saved.metadata.report_number,updated:saved.updated,count:saved.items.length},index=boot.projects.findIndex(p=>p.id===saved.id);
+  if(index>=0)boot.projects[index]=entry;else boot.projects.unshift(entry);renderProjects();
+ }});
+ $('retrySave').onclick=action(flush);$('resolveConflict').onclick=openSaveConflict;
+ $('saveSections').onclick=action(async()=>{await flush();toast('报告章节已保存到本地');});
+ $('conflictCopy').onclick=action(()=>recoverConflict());$('conflictLatest').onclick=action(()=>recoverConflict(true));$('conflictDownload').onclick=action(downloadRecovery);
+ $('conflictKeepEditing').onclick=()=>$('saveConflictDialog').close();
+ $('saveConflictDialog').oncancel=()=>{};
  $('managePersonnel').onclick=action(openPersonnel);
  $('newPersonnel').onclick=action(async()=>{if(await discardPersonnelChanges())loadPersonnelEditor();});
  const submitPersonnel=action(savePersonnel);$('personnelForm').onsubmit=e=>{e.preventDefault();submitPersonnel(e);};
@@ -471,23 +542,9 @@ async function init(){
  drop.addEventListener('drop',action(async e=>{e.preventDefault();drop.classList.remove('drag');await uploadPhotos([...e.dataTransfer.files]);}));
  // Avoid browser navigation if a photo is dropped outside the target.
  document.addEventListener('dragover',e=>e.preventDefault());document.addEventListener('drop',e=>e.preventDefault());
- $('closeReportPreview').onclick=()=>{$('reportPreviewDialog').close();$('reportPreviewPages').replaceChildren();};
- $('reportPreviewDialog').addEventListener('close',()=>{$('reportPreviewPages').replaceChildren();});
- $('previewButton').onclick=action(async()=>{
-  await flush();if(editorHasContent()&&!(await confirmAction('预览已保存的检查项','当前编辑区还有内容。预览只包含已保存检查项；若要包含当前项，请取消后点击 Save。')))return;
-  const button=$('previewButton');button.textContent='正在准备预览…';
-  try{
-   const result=await api('/api/preview',{id:project.id});
-   const pdf='/api/preview-pdf?id='+result.id;
-   $('reportPreviewPages').replaceChildren();
-   for(let page=1;page<=result.pages;page++){
-    const sheet=node('figure');const image=node('img');image.src='/api/preview-page?id='+result.id+'&page='+page;image.alt='报告第 '+page+' 页';image.loading='lazy';sheet.append(image,node('figcaption','第 '+page+' / '+result.pages+' 页'));$('reportPreviewPages').append(sheet);
-   }
-   $('openPreviewPdf').href=pdf;
-   $('downloadPreviewWord').href='/api/download?id='+result.id+'&name='+encodeURIComponent(result.name);
-   $('downloadPreviewWord').download=result.name;$('reportPreviewDialog').showModal();
-  }finally{button.textContent='预览报告';}
- });
+ $('closeReportPreview').onclick=()=>$('reportPreviewDialog').close();
+ $('reportPreviewDialog').addEventListener('close',()=>{updateSummary();});
+ $('previewButton').onclick=action(beginPreview);$('retryPreview').onclick=action(async()=>{previewJob=null;await beginPreview();});
  $('generateButton').onclick=action(async()=>{
   await flush();if(editorHasContent()&&!(await confirmAction('生成已保存的检查项','当前编辑区还有内容。报告只包含下方已保存检查项；若要包含当前项，请取消后点击 Save。')))return;
   const result=await api('/api/generate',{id:project.id});const a=node('a');a.href='/api/download?id='+result.id+'&name='+encodeURIComponent(result.name);a.download=result.name;document.body.append(a);a.click();a.remove();toast('Word 报告已生成；打开后按提示更新目录。');
@@ -499,7 +556,7 @@ async function init(){
  $('closeLibrary').onclick=()=>$('libraryDialog').close();$('importLibraryButton').onclick=()=>$('libraryFile').click();
  $('libraryFile').onchange=action(async e=>{const file=e.target.files[0];e.target.value='';if(!file)return;const result=await api('/api/library',file);boot.library=result.library;for(const key of ['observation','recommendation'])renderLibrary(key);$('libraryDialog').close();toast('文字库已更新。已保存检查项保持原样。');});
  $('exitButton').onclick=action(async()=>{await flush();if(!(await confirmAction('退出工作台','草稿已保存。退出后，下次双击程序可继续。')))return;await api('/api/shutdown',{});document.body.replaceChildren(node('main','工作台已退出，草稿已保存。可以关闭此页面。'));});
- window.addEventListener('beforeunload',e=>{if(saveTimer||busy||saveFailed){e.preventDefault();e.returnValue='';}});
- window.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'&&saveTimer)persist().catch(()=>{});});
+ window.addEventListener('beforeunload',e=>{if(saver.unsaved||busy||personnelDirty||photoEditor?.operations.length){e.preventDefault();e.returnValue='';}});
+ document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'&&saver.timer)saver.save().catch(()=>{});});
 }
 init().catch(e=>{status('无法打开工作台',true);toast(e.message);});

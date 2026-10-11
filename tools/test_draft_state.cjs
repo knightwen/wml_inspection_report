@@ -1,0 +1,21 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {DraftSaver,manualPerson}=require('../workbench/web/draft-state.js');
+const tick=()=>new Promise(resolve=>setImmediate(resolve));
+const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return {promise,resolve,reject};};
+(async()=>{
+ let project={id:'draft',revision:0,text:'A'},requests=[];
+ const saver=new DraftSaver({snapshot:()=>project,send:s=>{const d=deferred();requests.push({snapshot:s,...d});return d.promise;},onSaved:s=>{project.revision=s.revision;},delay:10000});
+ saver.schedule();assert(saver.unsaved);const first=saver.save();await tick();assert(saver.sending);assert.equal(requests[0].snapshot.text,'A');
+ project.text='B';saver.schedule();const second=saver.save();assert.equal(saver.pending,2);
+ requests[0].resolve({id:'draft',revision:1});await first;await tick();assert(saver.unsaved);assert.equal(saver.saved,1);assert.equal(requests[1].snapshot.revision,1);
+ requests[1].resolve({id:'draft',revision:2});await second;assert(!saver.unsaved);assert.equal(saver.pending,0);
+ project.text='C';saver.schedule();const failed=saver.save();await tick();requests[2].reject(new Error('network down'));await assert.rejects(failed,/network/);assert(saver.unsaved);assert.equal(project.text,'C');
+ const retry=saver.save();await tick();requests[3].resolve({id:'draft',revision:3});await retry;assert(!saver.unsaved);
+ project.text='D';saver.schedule();const conflict=saver.save();await tick();const error=Object.assign(new Error('conflict'),{code:'revision_conflict'});requests[4].reject(error);await assert.rejects(conflict,/conflict/);assert(saver.unsaved);
+ project.text='E';saver.schedule();await assert.rejects(saver.save(),/conflict/);assert.equal(requests.length,5);assert.equal(project.text,'E');
+ saver.reset(0);assert(!saver.unsaved);const copySave=saver.flush();await tick();requests[5].resolve({id:'copy',revision:1});await copySave;assert(!saver.unsaved);
+ const metadata={prepared_by:'Selected',prepared_by_id:'person',author_qualifications:'Q',author_title:'T',reviewer_title:'Reviewer'};manualPerson(metadata,'prepared_by','author');metadata.prepared_by='Manual';
+ assert.equal(metadata.author_qualifications,'');assert.equal(metadata.author_title,'');assert.equal(metadata.prepared_by_id,'');assert.equal(metadata.reviewer_title,'Reviewer');
+ console.log('Draft state regression passed: queued/in-flight saves, later edits, close protection, failure/retry, conflict freeze, copy reset, manual personnel.');
+})().catch(error=>{console.error(error);process.exitCode=1;});

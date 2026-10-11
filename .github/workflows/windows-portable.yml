@@ -38,6 +38,19 @@ jobs:
           python -m pip install --only-binary=:all: -r requirements.txt
       - name: Test application
         run: python workbench/test_workbench.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install browser regression dependencies
+        run: |
+          npm install --prefix .build/browser-deps --no-save --package-lock=false playwright@1.62.1
+          npx --prefix .build/browser-deps playwright install chromium
+      - name: Test save queue and browser workflows
+        env:
+          WML_TEST_BROWSER_CHANNEL: chromium
+        run: |
+          node tools/test_draft_state.cjs
+          node tools/test_browser_workbench.cjs
       - name: Validate Word template and generated reports
         shell: powershell
         run: ./tools/validate_reports.ps1
@@ -64,6 +77,8 @@ jobs:
             .build/qa/frozen-smoke-result.json
             .build/qa/frozen-generated.docx
             .build/qa/frozen-failure.log
+            .build/qa/browser-stability-result.json
+            .build/qa/browser-stability.png
             .build/pyinstaller-*/InspectionWorkbench/warn-InspectionWorkbench.txt
           include-hidden-files: true
           if-no-files-found: ignore
@@ -92,6 +107,7 @@ jobs:
           printf '%s\n' \
             'Windows 10/11 x64: download the ZIP, extract the complete folder, then double-click InspectionWorkbench.exe.' \
             'No Python or Word installation is required to generate reports.' \
+            'Report preview requires an installed and activated Microsoft Word.' \
             'Keep WorkbenchData when upgrading, or export/import a draft backup.' \
             'The ZIP includes application sources, third-party notices and HEIC component sources.' > "$RUNNER_TEMP/release-notes.txt"
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then

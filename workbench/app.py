@@ -2,6 +2,7 @@
 from datetime import datetime, date
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from io import BytesIO
+from copy import deepcopy
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs, unquote
 import argparse, hashlib, json, logging, mimetypes, os, re, secrets, shutil, subprocess, sys, threading, time, traceback, webbrowser, zipfile
@@ -10,6 +11,7 @@ import pillow_heif
 from lxml import etree as E
 from report_engine import generate_report
 from version import __version__
+from preview import PreviewManager,word_capability
 
 pillow_heif.register_heif_opener()
 Image.MAX_IMAGE_PIXELS = 100_000_000
@@ -18,8 +20,12 @@ WEB=Path(getattr(sys,'_MEIPASS',Path(__file__).parent))/'web'
 LIBRARY_POLICY=json.loads((RESOURCES/'library_policy.json').read_text(encoding='utf-8'))
 ID=re.compile(r'^[a-f0-9]{32}$')
 METADATA=['site','client','report_number','project_number','revision','report_date','prepared_by','reviewed_by','purpose','issued_to','document_name','author_qualifications','reviewer_qualifications','author_title','reviewer_title']
+from costs import validate_rows
+SECTION_FIELDS=['introduction','remedial_works','conclusion','cost_estimate']
 PERSON_REFERENCES=['prepared_by_id','reviewed_by_id']
 RATINGS=['element','condition_rating','likelihood','severity','priority']
+
+class RevisionConflict(ValueError):pass
 
 def atomic_json(path,value):
     temp=path.with_suffix('.tmp')
@@ -98,6 +104,7 @@ class Store:
         self.personnel_path=self.path/'personnel.json'
         if not self.personnel_path.exists():shutil.copyfile(RESOURCES/'personnel.json',self.personnel_path)
         self.personnel=json.loads(self.personnel_path.read_text(encoding='utf-8'))
+        self.previews=PreviewManager(self,RESOURCES)
 
     def save_personnel(self,value):
         with self.lock:
@@ -131,7 +138,10 @@ class Store:
     def load(self,pid):
         path=self.path_for_project(pid)
         if not path.exists():raise ValueError('找不到这份草稿')
-        return json.loads(path.read_text(encoding='utf-8'))
+        project=json.loads(path.read_text(encoding='utf-8'))
+        project.setdefault('sections',dict.fromkeys(SECTION_FIELDS,''))
+        project.setdefault('cost_rows',[])
+        return project
 
     def list(self):
         result=[]
@@ -142,12 +152,18 @@ class Store:
 
     def new(self):
         p={'id':secrets.token_hex(16),'revision':0,'updated':datetime.now().isoformat(timespec='seconds'),
-           'metadata':dict.fromkeys(METADATA,''),'items':[],'editor':{'photos':[],**dict.fromkeys(RATINGS+['observation','recommendation'],'')},'editor_id':None}
+           'metadata':dict.fromkeys(METADATA,''),'sections':dict.fromkeys(SECTION_FIELDS,''),'cost_rows':[],'items':[],'editor':{'photos':[],**dict.fromkeys(RATINGS+['observation','recommendation'],'')},'editor_id':None}
         p['metadata'].update({'client':'Town of Port Hedland','revision':'A','purpose':'Information','report_date':date.today().isoformat()})
         atomic_json(self.path_for_project(p['id']),p);return p
 
     def validate(self,p):
         identifier(p['id'])
+        validate_rows(p.setdefault('cost_rows',[]))
+        sections=p.setdefault('sections',dict.fromkeys(SECTION_FIELDS,''))
+        if not isinstance(sections,dict):raise ValueError('报告章节格式不正确')
+        for key in SECTION_FIELDS:
+            value=sections.setdefault(key,'')
+            if not isinstance(value,str) or len(value)>60000:raise ValueError('每个报告章节最多 60000 字符')
         if not isinstance(p.get('metadata'),dict) or not isinstance(p.get('items'),list) or len(p['items'])>1000:raise ValueError('草稿格式不正确')
         for key in METADATA:
             value=p['metadata'].get(key,'')
@@ -177,9 +193,20 @@ class Store:
     def save(self,p):
         with self.lock:
             self.validate(p);path=self.path_for_project(p['id']);existing=self.load(p['id'])
-            if existing['revision']!=p['revision']:raise ValueError('草稿已在其他页面更新，请刷新后重试')
+            if type(p.get('revision')) is not int or existing['revision']!=p['revision']:raise RevisionConflict('草稿已在其他页面更新。请先保留当前修改，再加载最新版本。')
+            for key,prefix in [('prepared_by','author'),('reviewed_by','reviewer')]:
+                ref=key+'_id'
+                if existing['metadata'].get(ref) and (not p['metadata'].get(ref) or (p['metadata'].get(ref)==existing['metadata'].get(ref) and p['metadata'][key]!=existing['metadata'][key])):
+                    p['metadata'][ref]='';p['metadata'][prefix+'_qualifications']='';p['metadata'][prefix+'_title']=''
             backup=self.path/'backups'/(p['id']+'.previous.json');shutil.copyfile(path,backup)
             p['revision']+=1;p['updated']=datetime.now().isoformat(timespec='seconds');atomic_json(path,p)
+            return p
+
+    def copy_project(self,p):
+        with self.lock:
+            p=deepcopy(p);self.validate(p)
+            p['id']=secrets.token_hex(16);p['revision']=0;p['updated']=datetime.now().isoformat(timespec='seconds')
+            atomic_json(self.path_for_project(p['id']),p)
             return p
 
     def upload(self,content,name):
@@ -263,42 +290,30 @@ class Store:
             self.catalog[new]=ph;atomic_json(self.catalog_path,self.catalog)
             return {'id':new,'name':old['name']}
 
-    def export(self,pid):
+    def report_snapshot(self,pid):
         with self.lock:
             p=self.load(pid);self.validate(p)
             if not p['items']:raise ValueError('请先保存至少一个检查项')
             if any(not p['metadata'].get(k,'').strip() for k in ['site','report_number','project_number']):raise ValueError('请先填写地点、报告编号和项目编号')
-            eid=secrets.token_hex(16);path=self.path/'exports'/(eid+'.docx')
-            generate_report(RESOURCES/'report_template.docx',p,self.photo_path,path)
-            name=re.sub(r'[<>:"/\\|?*\x00-\x1f]','_',p['metadata']['report_number']+'_REV'+p['metadata']['revision']+'-'+p['metadata']['site'])[:170]+'.docx'
-            return {'id':eid,'name':name}
+            return deepcopy(p)
+
+    def export_snapshot(self,p):
+        eid=secrets.token_hex(16);path=self.path/'exports'/(eid+'.docx')
+        generate_report(RESOURCES/'report_template.docx',p,self.photo_path,path)
+        name=re.sub(r'[<>:"/\\|?*\x00-\x1f]','_',p['metadata']['report_number']+'_REV'+p['metadata']['revision']+'-'+p['metadata']['site'])[:170]+'.docx'
+        return {'id':eid,'name':name}
+
+    def export(self,pid):return self.export_snapshot(self.report_snapshot(pid))
 
     def preview(self,pid):
-        with self.lock:
-            if os.name!='nt':raise ValueError('报告排版预览需要 Windows 和 Microsoft Word；仍可直接生成 Word 报告')
-            result=self.export(pid)
-            source=self.path/'exports'/(result['id']+'.docx')
-            try:
-                converted=subprocess.run(['powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',str(RESOURCES/'preview_report.ps1'),str(source.resolve())],capture_output=True,timeout=120,creationflags=subprocess.CREATE_NO_WINDOW)
-            except subprocess.TimeoutExpired:
-                raise ValueError('报告预览转换超时，请检查 Word 是否有待处理的窗口后重试')
-            pdf=source.with_suffix('.pdf')
-            if converted.returncode or not pdf.exists() or not pdf.read_bytes().startswith(b'%PDF-'):
-                logging.error('Preview conversion failed: %r',converted.stderr)
-                raise ValueError('无法转换报告预览，请确认已安装并激活 Microsoft Word；仍可直接生成 Word 报告')
-            import pypdfium2 as pdfium
-            with pdfium.PdfDocument(str(pdf)) as document:
-                result['pages']=len(document)
-                for index in range(len(document)):
-                    page=document[index]
-                    bitmap=page.render(scale=1.3)
-                    try:bitmap.to_pil().save(source.with_name(f'{result["id"]}-{index+1}.jpg'),'JPEG',quality=90)
-                    finally:bitmap.close();page.close()
-            return result
+        return self.previews.start(self.report_snapshot(pid))
 
     def backup(self,pid):
+        return self.backup_snapshot(self.load(pid))
+
+    def backup_snapshot(self,p):
         with self.lock:
-            p=self.load(pid); self.validate(p)
+            p=deepcopy(p);self.validate(p)
             photoids={ph['id'] for item in [*p['items'],p['editor']] for ph in item['photos']}
             result=BytesIO()
             with zipfile.ZipFile(result,'w',zipfile.ZIP_DEFLATED) as z:
@@ -363,7 +378,9 @@ class Handler(BaseHTTPRequestHandler):
         if not self.authorized():self.reply({'error':'请从程序启动的页面打开工作台'},403);return
         try:
             s=self.server.store
-            if url.path=='/api/bootstrap':self.reply({'library':s.library,'options':s.options,'personnel':s.personnel,'projects':s.list(),'data_folder':str(s.path),'version':__version__});return
+            if url.path=='/api/bootstrap':self.reply({'library':s.library,'options':s.options,'personnel':s.personnel,'projects':s.list(),'data_folder':str(s.path),'version':__version__,'preview_capability':word_capability()});return
+            if url.path=='/api/preview-job':self.reply(s.previews.get(identifier(query['id'][0])));return
+            if url.path=='/api/preview-capability':self.reply(word_capability());return
             if url.path=='/api/personnel':self.reply(s.personnel);return
             if url.path=='/api/project':self.reply(s.load(query['id'][0]));return
             if url.path.startswith('/photos/'):
@@ -382,7 +399,7 @@ class Handler(BaseHTTPRequestHandler):
                 source=s.path/'library.xlsx'
                 if not source.exists():source=RESOURCES/'word_library.xlsx'
                 self.send_bytes(source.read_bytes(),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',filename='word-library.xlsx');return
-            file={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/favicon.svg':'favicon.svg'}.get(url.path)
+            file={'/':'index.html','/app.js':'app.js','/draft-state.js':'draft-state.js','/style.css':'style.css','/favicon.svg':'favicon.svg'}.get(url.path)
             if not file:self.reply({'error':'Not found'},404);return
             self.send_bytes((WEB/file).read_bytes(),mimetypes.guess_type(file)[0] or 'text/plain')
         except Exception as exc:
@@ -400,6 +417,8 @@ class Handler(BaseHTTPRequestHandler):
             if length>limit:raise ValueError('文件过大')
             content=self.rfile.read(length);s=self.server.store
             if path=='/api/new':self.reply(s.new());return
+            if path=='/api/project-copy':self.reply(s.copy_project(json.loads(content)));return
+            if path=='/api/recovery-backup':self.send_bytes(s.backup_snapshot(json.loads(content)),'application/zip',filename='unsaved-draft.inspection.zip');return
             if path=='/api/personnel':self.reply(s.save_personnel(json.loads(content)));return
             if path=='/api/photo':self.reply(s.upload(content,unquote(self.headers.get('X-Filename','photo.jpg'))));return
             if path=='/api/rotate':self.reply(s.rotate(json.loads(content)['id']));return
@@ -418,6 +437,7 @@ class Handler(BaseHTTPRequestHandler):
             if path=='/api/shutdown':
                 self.reply({'ok':True});threading.Thread(target=self.server.shutdown,daemon=True).start();return
             self.reply({'error':'Not found'},404)
+        except RevisionConflict as exc:self.reply({'error':str(exc),'code':'revision_conflict'},409)
         except Exception as exc:
             logging.exception('POST failure');self.reply({'error':str(exc)},400)
 
@@ -453,6 +473,7 @@ def main():
     if not args.no_browser:webbrowser.open(url)
     try:server.serve_forever(poll_interval=.3)
     finally:
+        server.store.previews.close()
         server.server_close()
         if statepath.exists():statepath.unlink()
 

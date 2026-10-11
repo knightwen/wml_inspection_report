@@ -1,17 +1,20 @@
 """Build a Windows portable EXE using the active Python environment."""
 import os
+import tempfile
 from distribution import ROOT, OUTPUT, VERSION, require_windows_x64
 
 
 def main():
     require_windows_x64()
     os.environ['PYINSTALLER_CONFIG_DIR'] = str(ROOT / '.build/pyinstaller-cache')
+    # Fresh work directories avoid deleting OneDrive-locked files from an earlier build.
+    work = tempfile.mkdtemp(prefix=f'pyinstaller-v{VERSION}-', dir=ROOT / '.build')
     from PyInstaller.__main__ import run
     run([
         '--noconfirm', '--clean', '--onefile', '--windowed',
         '--name', 'InspectionWorkbench',
         '--distpath', str(OUTPUT),
-        '--workpath', str(ROOT / '.build' / f'pyinstaller-v{VERSION}'),
+        '--workpath', work,
         '--specpath', str(ROOT / '.build'),
         '--paths', str(ROOT / 'workbench'),
         '--add-data', str(ROOT / 'workbench/web') + ':web',

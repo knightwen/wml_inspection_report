@@ -84,8 +84,9 @@ def package():
             shutil.copyfile(ROOT / file, source / file)
         source_tools = source / 'tools'
         source_tools.mkdir()
-        for name in ('build_workbench.py', 'package_workbench.py', 'distribution.py', 'smoke_frozen_workbench.py', 'validate_reports.ps1', 'heic_sources.json', 'build_common_word_library.mjs'):
+        for name in ('build_workbench.py', 'package_workbench.py', 'distribution.py', 'smoke_frozen_workbench.py', 'validate_reports.ps1', 'heic_sources.json', 'build_common_word_library.mjs','test_draft_state.cjs','test_browser_workbench.cjs','browser_test_server.py','test_native_preview.py'):
             shutil.copyfile(ROOT / 'tools' / name, source_tools / name)
+        shutil.copytree(ROOT/'docs',source/'docs')
         shutil.copytree(stage / 'LICENSES', source / 'LICENSES')
         third = source / 'third_party'
         third.mkdir()
@@ -111,6 +112,9 @@ def package():
             f'检查报告工作台 {VERSION} · Windows 10/11 x64\n\n'
             '请先解压完整 ZIP，再双击 InspectionWorkbench.exe。首次启动需要几秒，会自动打开浏览器。\n'
             '无需安装 Python、Word 或照片编解码器；查看和编辑 DOCX 可使用 Word。\n\n'
+            '实际分页预览需要本机已安装并激活 Microsoft Word；无 Word 仍可编辑草稿并生成 DOCX。\n'
+            '预览在后台生成固定快照；可关闭预览窗口继续编辑，再查看进度和结果。\n'
+            '下载此份 Word 对应当前预览，后续编辑不会改变这份快照。转换失败时可重试。\n\n'
             '填写报告信息 → 拖入照片 → 填写评级和 Observation / Recommendation → Save → Generate。\n'
             '每个检查项支持多张照片，可旋转和排序。当前编辑项必须先 Save 才会进入报告。\n'
             '报告中的空白章节需后续补充，Word 目录需更新整个目录。\n\n'
@@ -120,6 +124,9 @@ def package():
             '升级前点击“退出程序”，解压新版并保留自己的 WorkbenchData。\n'
             '关闭浏览器不会退出服务，请点击页面右上角“退出程序”。\n'
             '文字库支持下载 Excel 编辑后导入。\n\n'
+            '保存状态会区分未保存、等待、保存中和失败。关闭页面前请等待已保存。\n'
+            '发生多页面保存冲突时，可以另存副本或下载包含照片的当前修改备份，再加载最新草稿。\n'
+            '从人员库切换到手动姓名会清除旧人员的资质与职位；既有报告快照不受人员库变更影响。\n\n'
             '分发给同事请保留 LICENSES 和 source；本 ZIP 不包含个人草稿或现场照片。\n', encoding='utf-8')
         pending = ARCHIVE.with_suffix('.zip.tmp')
         with zipfile.ZipFile(pending, 'w', zipfile.ZIP_DEFLATED) as archive:

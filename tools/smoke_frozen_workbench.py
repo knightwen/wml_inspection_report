@@ -62,6 +62,10 @@ def exercise(executable, folder, fixtures, qa):
         assert original.read_bytes()==fixture.read_bytes();photos.append(photo)
     rotated=request('/api/rotate',{'id':photos[0]['id']});assert rotated['id']!=photos[0]['id']
     photos[0]=rotated
+    edited=request('/api/photo-edit',{'id':rotated['id'],'operations':[{'type':'crop','box':[20,30,520,630]},{'type':'circle','box':[30,30,200,200]},{'type':'arrow','box':[250,400,400,450],'color':'#1677ff','width':8}]})
+    photos[0]={**edited,'caption':'Edited portable photograph'}
+    assert (folder/'originals'/(edited['id']+'.jpg')).read_bytes()==(fixtures/'landscape.jpg').read_bytes()
+    with Image.open(BytesIO(request('/photos/'+edited['id']+'.jpg',raw=True))) as image:assert image.size==(500,600)
     item={'id':'a'*32,'photos':photos,'element':'Columns','condition_rating':'5. Major deterioration','likelihood':'Likely','severity':'Significant','priority':'Critical','observation':'Minor corrosion. Manually edited in the standalone EXE test.','recommendation':'Clean, wire brush and repaint.'}
     p['items']=[item];p=request('/api/save',p)
     export=request('/api/generate',{'id':p['id']})
@@ -70,6 +74,8 @@ def exercise(executable, folder, fixtures, qa):
         document=z.read('word/document.xml').decode()
         assert 'Frozen EXE Test' in document and item['observation'] in document
         assert all(value in document for value in ['Frozen Test Author','Test Qualification','Test Author Title'])
+        assert 'Edited portable photograph' in document
+        assert z.read('word/media/inspection-1-1.jpg')==(folder/'photos'/(edited['id']+'.jpg')).read_bytes()
         assert '{{' not in document and '1/19 Dempster' not in document
         assert len([n for n in z.namelist() if n.startswith('word/media/inspection-')])==2
         from lxml import etree
@@ -94,11 +100,57 @@ def exercise(executable, folder, fixtures, qa):
         except urllib.error.HTTPError as e:assert e.code==403
     assert len(request('/api/bootstrap')['projects'])==before
 
+    stale=json.loads(json.dumps(p));p['metadata']['site']='Remote update';p=request('/api/save',p)
+    stale['metadata']['site']='Local unsaved update'
+    try:request('/api/save',stale);raise AssertionError('Expected conflict')
+    except urllib.error.HTTPError as error:
+        assert error.code==409 and json.loads(error.read())['code']=='revision_conflict'
+    copy=request('/api/project-copy',stale);assert copy['id']!=p['id'] and copy['metadata']['site']=='Local unsaved update'
+    recovery=request('/api/recovery-backup',stale,raw=True);assert request('/api/restore',recovery)['metadata']['site']=='Local unsaved update'
+    p['metadata'].update(prepared_by='Manual portable author',prepared_by_id='');p=request('/api/save',p)
+    assert p['metadata']['author_qualifications']=='' and p['metadata']['author_title']==''
+    assert boot['preview_capability']['available'] is False
+    try:request('/api/preview',{'id':p['id']});raise AssertionError('No Word preview should fail clearly')
+    except urllib.error.HTTPError as error:assert error.code==400 and 'Word' in json.loads(error.read())['error']
+    assert request('/api/generate',{'id':p['id']})['id']
+    repeated=subprocess.run([str(executable),'--no-browser'],capture_output=True,timeout=20,creationflags=subprocess.CREATE_NO_WINDOW)
+    assert repeated.returncode==0 and request('/api/bootstrap')['version']==VERSION
+
     request('/api/shutdown', {})
     return {'status': 'passed', 'version': VERSION, 'report_bytes': len(report),
             'checks': ['ZIP extraction', 'standalone startup and web assets', 'portable data folder',
-                       'HEIC/JPG import', 'rotation and originals', 'save/reopen', 'DOCX export',
-                       'backup/restore', 'Excel library', 'editable personnel and DOCX metadata', 'loopback authentication', 'shutdown']}
+                       'HEIC/JPG import', 'rotation/crop/annotation and originals', 'save/reopen', 'DOCX export',
+                       'backup/restore', 'Excel library', 'personnel snapshot and manual clearing', 'loopback authentication', 'conflict/copy/recovery ZIP', 'no Word environment with DOCX export', 'repeated startup', 'shutdown']}
+
+
+def verify_readonly_fallback(executable,directory,environment):
+    restricted=directory/'readonly-program';restricted.mkdir()
+    test_exe=restricted/executable.name;shutil.copyfile(executable,test_exe)
+    assert restricted.resolve().is_relative_to((root/'.build/qa').resolve())
+    profile=directory/'fallback-profile';profile.mkdir()
+    test_env={**environment,'LOCALAPPDATA':str(profile)}
+    acl=subprocess.run(['icacls',str(restricted),'/deny','*S-1-1-0:(W)'],capture_output=True)
+    if acl.returncode:raise RuntimeError('Unable to set isolated read-only test directory: '+repr(acl.stderr))
+    process=None
+    try:
+        try:(restricted/'.write-probe').write_text('test');raise AssertionError('Read-only test did not block writes')
+        except PermissionError:pass
+        process=subprocess.Popen([str(test_exe),'--no-browser'],cwd=directory,env=test_env,creationflags=subprocess.CREATE_NO_WINDOW)
+        folder=profile/'WMLInspectionWorkbench';deadline=time.monotonic()+60
+        while not (folder/'running.json').exists():
+            if time.monotonic()>deadline:raise RuntimeError('Read-only fallback did not start')
+            time.sleep(.2)
+        state=json.loads((folder/'running.json').read_text());base='http://127.0.0.1:'+str(state['port']);headers={'Cookie':'workbench='+state['token'],'X-Workbench':'1'}
+        with urllib.request.urlopen(urllib.request.Request(base+'/api/bootstrap',headers=headers)) as response:boot=json.load(response)
+        assert Path(boot['data_folder'])==folder and boot['version']==VERSION
+        with urllib.request.urlopen(urllib.request.Request(base+'/api/shutdown',data=b'{}',headers={**headers,'Content-Type':'application/json'})) as response:assert json.load(response)['ok']
+        assert process.wait(timeout=15)==0
+    finally:
+        if process and process.poll() is None:
+            subprocess.run(['taskkill','/PID',str(process.pid),'/T','/F'],capture_output=True);process.wait(timeout=15)
+        # Restore permissions only on this verified, task-created directory.
+        restored=subprocess.run(['icacls',str(restricted),'/remove:d','*S-1-1-0'],capture_output=True)
+        if restored.returncode:raise RuntimeError('Unable to restore isolated test directory permissions')
 
 
 def main():
@@ -128,6 +180,7 @@ def main():
         Image.new('RGB', (320, 480), '#789977').save(fixtures / 'portrait.heic', 'HEIF')
         environment = {k:v for k,v in os.environ.items() if not k.startswith('PYTHON')}
         environment['PATH'] = os.environ.get('SystemRoot', r'C:\Windows') + r'\System32'
+        environment['WML_DISABLE_WORD_PREVIEW']='1'  # Deterministic no-Word scenario; registry capability is also tested separately.
         process = subprocess.Popen([str(executable), '--no-browser'], cwd=directory, env=environment,
                                    creationflags=subprocess.CREATE_NO_WINDOW)
         try:
@@ -143,6 +196,8 @@ def main():
                 # PyInstaller onefile uses a child process; clean up the entire test tree.
                 subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'], capture_output=True)
                 process.wait(timeout=15)
+        verify_readonly_fallback(executable,directory,environment)
+        result['checks'].append('real read-only program directory fallback')
         (qa / 'frozen-smoke-result.json').write_text(json.dumps(result, indent=2), encoding='utf-8')
         print(json.dumps(result))
 
