@@ -1,6 +1,6 @@
 """Generate reports by cloning the retained Word template's OOXML components."""
 from copy import deepcopy
-from datetime import date
+from datetime import date, datetime, timezone
 from io import BytesIO
 from pathlib import Path
 import re
@@ -13,12 +13,21 @@ R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
 P = 'http://schemas.openxmlformats.org/package/2006/relationships'
 NS = {'w': W, 'r': R}
 COLORS = {'Critical': 'FF6600', 'High': 'FF9933', 'Moderate': 'FFCC00', 'Low': '92D050', 'Urgent': 'FF0000'}
+# OOXML property children are ordered sequences, even when ordinary XML parsers
+# accept another order. Keep the existing formatting values while fixing order.
+PROPERTY_ORDER = {
+    'pPr': 'pStyle keepNext keepLines pageBreakBefore framePr widowControl numPr suppressLineNumbers pBdr shd tabs suppressAutoHyphens kinsoku wordWrap overflowPunct topLinePunct autoSpaceDE autoSpaceDN bidi adjustRightInd snapToGrid spacing ind contextualSpacing mirrorIndents suppressOverlap jc textDirection textAlignment textboxTightWrap outlineLvl divId cnfStyle rPr sectPr pPrChange',
+    'rPr': 'rStyle rFonts b bCs i iCs caps smallCaps strike dstrike outline shadow emboss imprint noProof snapToGrid vanish webHidden color spacing w kern position sz szCs highlight u effect bdr shd fitText vertAlign rtl cs em lang eastAsianLayout specVanish oMath rPrChange',
+    'tcPr': 'cnfStyle tcW gridSpan hMerge vMerge tcBorders shd noWrap tcMar textDirection tcFitText vAlign hideMark headers cellIns cellDel cellMerge tcPrChange',
+    'settings': 'writeProtection view zoom removePersonalInformation removeDateAndTime doNotDisplayPageBoundaries displayBackgroundShape printPostScriptOverText printFractionalCharacterWidth printFormsData embedTrueTypeFonts embedSystemFonts saveSubsetFonts saveFormsData mirrorMargins alignBordersAndEdges bordersDoNotSurroundHeader bordersDoNotSurroundFooter gutterAtTop hideSpellingErrors hideGrammaticalErrors activeWritingStyle proofState formsDesign attachedTemplate linkStyles stylePaneFormatFilter stylePaneSortMethod documentType mailMerge revisionView trackRevisions doNotTrackMoves doNotTrackFormatting documentProtection autoFormatOverride styleLockTheme styleLockQFSet defaultTabStop autoHyphenation consecutiveHyphenLimit hyphenationZone doNotHyphenateCaps showEnvelope summaryLength clickAndTypeStyle defaultTableStyle evenAndOddHeaders bookFoldRevPrinting bookFoldPrinting bookFoldPrintingSheets drawingGridHorizontalSpacing drawingGridVerticalSpacing displayHorizontalDrawingGridEvery displayVerticalDrawingGridEvery doNotUseMarginsForDrawingGridOrigin drawingGridHorizontalOrigin drawingGridVerticalOrigin doNotShadeFormData noPunctuationKerning characterSpacingControl printTwoOnOne strictFirstAndLastChars noLineBreaksAfter noLineBreaksBefore savePreviewPicture doNotValidateAgainstSchema saveInvalidXml ignoreMixedContent alwaysShowPlaceholderText doNotDemarcateInvalidXml saveXmlDataOnly useXSLTWhenSaving saveThroughXslt showXMLTags alwaysMergeEmptyNamespace updateFields hdrShapeDefaults footnotePr endnotePr compat docVars rsids mathPr attachedSchema themeFontLang clrSchemeMapping doNotIncludeSubdocsInStats doNotAutoCompressPictures forceUpgrade captions readModeInkLockDown smartTagType shapeDefaults doNotEmbedSmartTags decimalSymbol listSeparator',
+}
 
 def q(name):
     return '{' + W + '}' + name
 
 def child(parent, name, **attrs):
-    node = E.SubElement(parent, q(name))
+    node = parent.find(q(name)) if parent.tag in {q(key) for key in PROPERTY_ORDER} else None
+    if node is None:node = E.SubElement(parent, q(name))
     for key, value in attrs.items():
         node.set(q(key), str(value))
     return node
@@ -200,15 +209,40 @@ def prepare_template(source, target):
     for name in ['docProps/core.xml','docProps/custom.xml']:
         if name in parts:
             node=E.fromstring(parts[name])
-            for n in node.iter():
-                if len(n)==0 and n.text: n.text=''
+            for n in list(node):node.remove(n)
             parts[name]=xml(node)
     write_package(parts,target)
 
 def write_package(parts,target):
+    parts=normalize_package(parts)
     target=Path(target); target.parent.mkdir(parents=True,exist_ok=True)
     with zipfile.ZipFile(target,'w',zipfile.ZIP_DEFLATED) as z:
         for name, content in parts.items(): z.writestr(name,content)
+
+def normalize_package(parts):
+    """Repair property order and empty typed metadata, including older templates."""
+    parts=dict(parts)
+    orders={q(parent):{q(name):index for index,name in enumerate(names.split())} for parent,names in PROPERTY_ORDER.items()}
+    # Mathematics properties belong to the Office Math namespace, not w:.
+    settings_order=orders[q('settings')]
+    settings_order['{http://schemas.openxmlformats.org/officeDocument/2006/math}mathPr']=settings_order.pop(q('mathPr'))
+    for name,content in parts.items():
+        if not name.endswith('.xml'):continue
+        root=E.fromstring(content);changed=False
+        # Reordering a parent must not change which descendants get visited.
+        for parent in list(root.iter()):
+            order=orders.get(parent.tag)
+            if order is None:continue
+            children=list(parent);ordered=sorted(children,key=lambda node:order.get(node.tag,len(order)))
+            if children!=ordered:parent[:]=ordered;changed=True
+        if name=='docProps/core.xml':
+            for node in list(root):
+                if not (node.text or '').strip():root.remove(node);changed=True
+        if name=='docProps/custom.xml':
+            for node in list(root):
+                if not ''.join(node.itertext()).strip():root.remove(node);changed=True
+        if changed:parts[name]=xml(root)
+    return parts
 
 def metadata_values(meta):
     values={key:str(value or '') for key,value in meta.items()}
@@ -300,7 +334,12 @@ def generate_report(template, project, photo_path, target):
             rid='rId'+str(nextid);used_ids.add(rid);nextid+=1
             media=f'media/inspection-{itemindex}-{pi}.jpg';parts['word/'+media]=Path(path).read_bytes()
             E.SubElement(relations,'{'+P+'}Relationship',Id=rid,Type=R+'/image',Target=media)
-            cells[1].append(image_paragraph(rid,size,pictureid,photo['name'],photo_width));pictureid+=1
+            cells[1].append(image_paragraph(rid,size,pictureid,photo.get('caption') or photo['name'],photo_width));pictureid+=1
+            if photo.get('caption','').strip():
+                caption=paragraph(photo['caption']);pr=child(caption,'pPr');caption.remove(pr);caption.insert(0,pr)
+                child(pr,'jc',val='center');child(pr,'spacing',before='60',after='0')
+                rpr=E.Element(q('rPr'));caption.find('w:r',NS).insert(0,rpr);child(rpr,'sz',val='18')
+                cells[1].append(caption)
             if pi==1:
                 cells[2].append(content_paragraph('OBSERVATION',item['observation'],description_properties))
                 if item['recommendation'].strip():
@@ -331,5 +370,11 @@ def generate_report(template, project, photo_path, target):
         n=core.find(tag)
         if n is None:n=E.SubElement(core,tag)
         n.text=text
+    timestamp=datetime.now(timezone.utc).isoformat(timespec='seconds').replace('+00:00','Z')
+    for name in ['created','modified']:
+        tag='{http://purl.org/dc/terms/}'+name
+        node=core.find(tag)
+        if node is None:node=E.SubElement(core,tag)
+        node.text=timestamp;node.set('{http://www.w3.org/2001/XMLSchema-instance}type','dcterms:W3CDTF')
     parts['docProps/core.xml']=xml(core)
     write_package(parts,target)

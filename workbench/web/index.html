@@ -1,10 +1,10 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Inspection Workbench · 检查报告工作台</title><link rel="icon" href="/favicon.svg"><link rel="stylesheet" href="/style.css"></head>
 <body>
-<header class="topbar"><div class="brand"><span class="brand-mark">W</span><div><strong>Inspection Workbench</strong><small>照片、现场记录与 Word 报告</small></div><span class="local"><i></i> 本地运行</span></div><div class="top-actions"><span id="saveStatus" role="status">正在打开…</span><button id="libraryButton" class="quiet">文字库</button><button id="exitButton" class="quiet">退出程序</button></div></header>
+<header class="topbar"><div class="brand"><span class="brand-mark">W</span><div><strong>Inspection Workbench</strong><small>照片、现场记录与 Word 报告</small></div><span class="local"><i></i> 本地运行</span></div><div class="top-actions"><span id="saveStatus" role="status">正在打开…</span><button id="managePersonnel" class="quiet">人员库</button><button id="libraryButton" class="quiet">文字库</button><button id="exitButton" class="quiet">退出程序</button></div></header>
 <main>
 <section class="project-bar"><div><span class="eyebrow">REPORT WORKSPACE</span><h1 id="projectTitle">新的检查报告</h1><p id="projectSubtitle">先填写报告信息，再整理现场照片。</p></div><div class="project-actions"><label class="sr-only" for="projectSelect">选择草稿</label><select id="projectSelect"><option>打开草稿</option></select><button id="newProject">＋ 新建报告</button><button id="backupButton" title="备份包含照片和全部草稿文字">备份草稿</button><button id="restoreButton">导入草稿</button><input id="restoreFile" type="file" accept=".zip" hidden></div></section>
-<details id="reportDetails" class="panel report-details" open><summary><span><b>01</b> 报告信息 <small>填写封面与文档信息页</small></span><span class="summary-hint">展开 / 收起</span></summary><div class="personnel-tools"><p>从人员库选择作者和审阅者，自动填写资质与职位。当前报告可单独调整。</p><button id="managePersonnel">管理人员库</button></div><div id="metadataFields" class="metadata-grid"></div><p class="form-note">人员库修改后，重新选择人员可更新当前报告。其余正文保留空白模板。</p></details>
+<details id="reportDetails" class="panel report-details" open><summary><span class="section-title"><span class="step">01</span><span class="section-heading-text" role="heading" aria-level="2">报告信息</span></span><span class="summary-hint">展开 / 收起</span></summary><div id="metadataFields" class="metadata-grid"></div></details>
 <section class="panel editor-panel"><div class="section-heading"><div><span class="step">02</span><h2 id="editorTitle">整理一个检查项</h2><span id="editingBadge" class="editing-badge" hidden>编辑已保存检查项</span></div><button id="resetEditor" class="quiet">清空当前项</button></div>
 <div class="rating-grid" id="ratingFields"></div>
 <div class="editor-grid">
@@ -12,14 +12,14 @@
  <section class="word-column"><div class="column-title"><h3>Observation</h3><span id="observationCount">文字库</span></div><label for="observationSearch" class="field-label">搜索文字库</label><input id="observationSearch" type="search" placeholder="如 corrosion、column、good condition"><label for="observationSelect" class="sr-only">选择 Observation</label><select id="observationSelect" class="library-select"><option value="">从文字库选择…</option></select><label for="observationText" class="field-label text-label">现场描述 <span>选择后仍可自由编辑</span></label><textarea id="observationText" placeholder="选择描述，或直接输入现场情况。" spellcheck="true"></textarea><span id="observationSource" class="source-note">手动输入</span></section>
  <section class="word-column"><div class="column-title"><h3>Recommendation</h3><span id="recommendationCount">文字库</span></div><label for="recommendationSearch" class="field-label">搜索文字库</label><input id="recommendationSearch" type="search" placeholder="如 repaint、replace、investigate"><label for="recommendationSelect" class="sr-only">选择 Recommendation</label><select id="recommendationSelect" class="library-select"><option value="">从文字库选择…</option></select><label for="recommendationText" class="field-label text-label">处理建议 <span>选择后仍可自由编辑</span></label><textarea id="recommendationText" placeholder="选择建议，或手动输入；可以留空。" spellcheck="true"></textarea><span id="recommendationSource" class="source-note">手动输入</span></section>
 </div><div class="editor-footer"><p id="editorHint">填写构件与评级、加入照片和 Observation 后保存。</p><button id="saveItem" class="primary">Save · 保存检查项</button></div></section>
-<section class="panel saved-panel"><div class="section-heading"><div><span class="step">03</span><h2>已保存检查项</h2><span id="itemCount" class="count-badge">0</span></div><p>导出顺序与这里一致</p></div><div id="savedItems"></div><div class="generate-bar"><div><strong id="reportSummary">还没有已保存的检查项</strong><small>导出封面、文档信息页、检查表及其余空白章节。</small></div><button id="generateButton" class="generate" disabled>Generate · 生成 Word 报告 <span>↗</span></button></div></section>
+<section class="panel saved-panel"><div class="section-heading"><div><span class="step">03</span><h2>已保存检查项</h2><span id="itemCount" class="count-badge">0</span></div><p>导出顺序与这里一致</p></div><div id="savedItems"></div><div class="generate-bar"><div><strong id="reportSummary">还没有已保存的检查项</strong><small>导出封面、文档信息页、检查表及其余空白章节。</small></div><button id="previewButton" disabled>预览报告</button><button id="generateButton" class="generate" disabled>Generate · 生成 Word 报告 <span>↗</span></button></div></section>
 <footer class="app-footer"><span id="dataFolder"></span><span id="appVersion"></span></footer>
 </main>
+<dialog id="reportPreviewDialog" class="report-preview-dialog"><div class="dialog-header"><h2>报告预览</h2><button id="closeReportPreview" aria-label="关闭报告预览">×</button></div><p>预览包含已保存检查项。下载的 Word 与此次预览使用同一份报告。</p><div id="reportPreviewPages" class="report-preview-pages" aria-label="报告逐页预览"></div><div class="dialog-actions"><a id="openPreviewPdf" class="button" target="_blank" rel="noopener">新窗口查看 PDF</a><a id="downloadPreviewWord" class="button" download>下载此份 Word</a></div></dialog>
 <dialog id="libraryDialog"><div class="dialog-header"><h2>常用措辞库</h2><button id="closeLibrary" aria-label="关闭文字库窗口">×</button></div><p>内置库仅收录历史报告出现至少 2 次的措辞，按历史频次排序。选择后请按现场情况编辑位置、构件编号和章节引用。</p><div id="libraryStats" class="library-stats"></div><p>在 Excel 中编辑黄色列，用“启用”决定是否显示；保存后导入更新。已保存检查项的文字保持原样。</p><div class="dialog-actions"><a href="/api/library-file" class="button" download>下载当前 Excel</a><button id="importLibraryButton" class="primary">导入编辑后的 Excel</button><input id="libraryFile" type="file" accept=".xlsx" hidden></div></dialog>
 <dialog id="confirmDialog"><h2 id="confirmTitle">确认操作</h2><p id="confirmText"></p><div class="dialog-actions"><button id="confirmCancel">取消</button><button id="confirmOk" class="primary">确认</button></div></dialog>
 <dialog id="personnelDialog" class="personnel-dialog" aria-labelledby="personnelDialogTitle">
  <div class="dialog-header"><h2 id="personnelDialogTitle">人员库</h2><button id="closePersonnel" type="button" aria-label="关闭人员库">×</button></div>
- <p>同一人可同时担任作者和审阅者。新增或修改后点击保存，后续报告即可选择。</p>
  <div class="personnel-layout">
   <aside><button id="newPersonnel" type="button" class="personnel-add">＋ 新增人员</button><div id="personnelList" class="personnel-list"></div></aside>
   <form id="personnelForm" class="personnel-form">
@@ -31,6 +31,21 @@
    <div class="dialog-actions"><button id="deletePersonnel" type="button" class="personnel-delete">删除人员</button><button id="savePersonnel" type="submit" class="primary">保存修改</button></div>
   </form>
  </div>
+</dialog>
+<dialog id="photoEditorDialog" class="photo-editor-dialog" aria-labelledby="photoEditorTitle">
+ <div class="dialog-header"><h2 id="photoEditorTitle">编辑照片</h2><button id="closePhotoEditor" aria-label="关闭照片编辑">×</button></div>
+ <div class="photo-editor-tools" role="toolbar" aria-label="照片编辑工具">
+  <button id="photoToolCrop" aria-pressed="true">裁剪</button><button id="photoToolCircle" aria-pressed="false">圆圈</button><button id="photoToolRectangle" aria-pressed="false">矩形</button><button id="photoToolArrow" aria-pressed="false">箭头</button><button id="photoToolPen" aria-pressed="false">画笔</button><button id="photoToolPan" aria-pressed="false">移动视图</button>
+ </div>
+ <div class="photo-edit-settings">
+  <div id="photoCropSettings"><label for="photoCropRatio">裁剪比例</label><select id="photoCropRatio"><option value="0">自由</option><option value="1">1:1</option><option value="1.3333333333">4:3</option><option value="0.75">3:4</option><option value="1.7777777778">16:9</option></select><button id="applyPhotoCrop">应用裁剪</button></div>
+  <div id="photoMarkSettings" hidden><label for="photoMarkColor">颜色</label><select id="photoMarkColor"><option value="#e32636">红色</option><option value="#f5c400">黄色</option><option value="#1677ff">蓝色</option><option value="#ffffff">白色</option><option value="#222222">黑色</option></select><label for="photoMarkWidth">线宽</label><select id="photoMarkWidth"><option value="0.65">细</option><option value="1" selected>标准</option><option value="2">粗</option></select></div>
+  <div class="photo-edit-history"><button id="rotatePhotoLeft" aria-label="向左旋转 90 度">↶ 旋转</button><button id="rotatePhotoRight" aria-label="向右旋转 90 度">↷ 旋转</button><button id="undoPhotoEdit" disabled>撤销</button><button id="redoPhotoEdit" disabled>重做</button><button id="resetPhotoEdit" disabled>重置</button></div>
+ </div>
+ <p id="photoEditHint">拖动裁剪框或四角调整范围。</p>
+ <div id="photoEditStage" class="photo-edit-stage"><div class="photo-canvas-wrap"><canvas id="photoEditCanvas" tabindex="0" aria-label="照片编辑画布"></canvas></div></div>
+ <div class="photo-edit-view"><span id="photoEditSize"></span><div><button id="photoZoomOut" aria-label="缩小照片">−</button><span id="photoZoomValue">适合窗口</span><button id="photoZoomIn" aria-label="放大照片">＋</button><button id="photoZoomFit">适合窗口</button></div></div>
+ <div class="dialog-actions"><button id="cancelPhotoEdit">取消</button><button id="savePhotoEdit" class="primary" disabled>保存照片</button></div>
 </dialog>
 <div id="toast" role="status" hidden></div>
 <script src="/app.js" defer></script></body></html>

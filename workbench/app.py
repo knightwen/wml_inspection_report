@@ -4,7 +4,7 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from io import BytesIO
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs, unquote
-import argparse, hashlib, json, logging, mimetypes, os, re, secrets, shutil, sys, threading, time, traceback, webbrowser, zipfile
+import argparse, hashlib, json, logging, mimetypes, os, re, secrets, shutil, subprocess, sys, threading, time, traceback, webbrowser, zipfile
 from PIL import Image, ImageOps
 import pillow_heif
 from lxml import etree as E
@@ -165,6 +165,9 @@ class Store:
                 pid=identifier(photo['id'])
                 if pid not in self.catalog:raise ValueError('照片不存在，请重新导入')
                 photo['name']=self.catalog[pid]['name']
+                caption=photo.get('caption','')
+                if not isinstance(caption,str) or len(caption)>200:raise ValueError('照片名称最多 200 字符')
+                photo['caption']=caption.strip()
             if item in p['items']:
                 iid=identifier(item['id'])
                 if iid in itemids:raise ValueError('检查项编号重复')
@@ -200,6 +203,55 @@ class Store:
 
     def photo_path(self,pid):return self.path/'photos'/(identifier(pid)+'.jpg')
 
+    def edit_photo(self,pid,operations):
+        from PIL import ImageDraw
+        import math
+        if not isinstance(operations,list) or not 1<=len(operations)<=50:raise ValueError('请先裁剪或添加标注，最多 50 步')
+        with self.lock:
+            pid=identifier(pid);old=self.catalog[pid]
+            with Image.open(self.photo_path(pid)) as source:image=source.convert('RGB')
+            for operation in operations:
+                if not isinstance(operation,dict) or operation.get('type') not in ['crop','circle','rectangle','arrow','pen','rotate']:raise ValueError('不支持的照片编辑操作')
+                kind=operation['type']
+                if kind=='rotate':
+                    if type(operation.get('turn')) is not int or operation['turn'] not in [-1,1]:raise ValueError('旋转方向无效')
+                    image=image.transpose(Image.Transpose.ROTATE_270 if operation['turn']==1 else Image.Transpose.ROTATE_90)
+                    continue
+                color=operation.get('color','#e32636');width=operation.get('width',max(2,round(min(image.size)/150)))
+                if color not in ['#e32636','#f5c400','#1677ff','#ffffff','#222222']:raise ValueError('标注颜色无效')
+                if type(width) is not int or not 1<=width<=60:raise ValueError('标注线宽无效')
+                draw=ImageDraw.Draw(image)
+                if kind=='pen':
+                    points=operation.get('points')
+                    if not isinstance(points,list) or not 2<=len(points)<=2000:raise ValueError('画笔轨迹无效')
+                    if any(not isinstance(p,list) or len(p)!=2 or any(type(v) not in (int,float) or not math.isfinite(v) for v in p) for p in points):raise ValueError('画笔轨迹无效')
+                    points=[tuple(round(v) for v in p) for p in points]
+                    if any(not 0<=x<image.width or not 0<=y<image.height for x,y in points):raise ValueError('画笔轨迹超出照片范围')
+                    draw.line(points,fill=color,width=width,joint='curve')
+                    continue
+                box=operation.get('box')
+                if not isinstance(box,list) or len(box)!=4 or any(type(v) not in (int,float) or not math.isfinite(v) for v in box):raise ValueError('编辑区域无效')
+                x0,y0,x1,y1=[round(v) for v in box]
+                if kind=='arrow':
+                    if not all(0<=x<image.width and 0<=y<image.height for x,y in [(x0,y0),(x1,y1)]) or math.hypot(x1-x0,y1-y0)<3:raise ValueError('箭头区域无效')
+                    draw.line((x0,y0,x1,y1),fill=color,width=width)
+                    angle=math.atan2(y1-y0,x1-x0);length=min(math.hypot(x1-x0,y1-y0)*.4,max(12,width*4))
+                    wings=[(x1-length*math.cos(angle+a),y1-length*math.sin(angle+a)) for a in [-.5,.5]]
+                    draw.line([wings[0],(x1,y1),wings[1]],fill=color,width=width,joint='curve')
+                    continue
+                if not 0<=x0<x1<=image.width or not 0<=y0<y1<=image.height:raise ValueError('编辑区域超出照片范围')
+                if kind=='crop':
+                    if x1-x0<10 or y1-y0<10:raise ValueError('裁剪区域太小')
+                    image=image.crop((x0,y0,x1,y1))
+                elif kind=='rectangle':draw.rectangle((x0,y0,x1-1,y1-1),outline=color,width=width)
+                else:draw.ellipse((x0,y0,x1-1,y1-1),outline=color,width=width)
+            new=secrets.token_hex(16)
+            image.save(self.photo_path(new),'JPEG',quality=92)
+            shutil.copyfile(self.path/'originals'/(pid+old['original_ext']),self.path/'originals'/(new+old['original_ext']))
+            self.catalog[new]={**old,'id':new,'width':image.width,'height':image.height}
+            atomic_json(self.catalog_path,self.catalog)
+            return {'id':new,'name':old['name']}
+
     def rotate(self,pid):
         with self.lock:
             old=self.catalog[identifier(pid)];new=secrets.token_hex(16)
@@ -220,6 +272,29 @@ class Store:
             generate_report(RESOURCES/'report_template.docx',p,self.photo_path,path)
             name=re.sub(r'[<>:"/\\|?*\x00-\x1f]','_',p['metadata']['report_number']+'_REV'+p['metadata']['revision']+'-'+p['metadata']['site'])[:170]+'.docx'
             return {'id':eid,'name':name}
+
+    def preview(self,pid):
+        with self.lock:
+            if os.name!='nt':raise ValueError('报告排版预览需要 Windows 和 Microsoft Word；仍可直接生成 Word 报告')
+            result=self.export(pid)
+            source=self.path/'exports'/(result['id']+'.docx')
+            try:
+                converted=subprocess.run(['powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',str(RESOURCES/'preview_report.ps1'),str(source.resolve())],capture_output=True,timeout=120,creationflags=subprocess.CREATE_NO_WINDOW)
+            except subprocess.TimeoutExpired:
+                raise ValueError('报告预览转换超时，请检查 Word 是否有待处理的窗口后重试')
+            pdf=source.with_suffix('.pdf')
+            if converted.returncode or not pdf.exists() or not pdf.read_bytes().startswith(b'%PDF-'):
+                logging.error('Preview conversion failed: %r',converted.stderr)
+                raise ValueError('无法转换报告预览，请确认已安装并激活 Microsoft Word；仍可直接生成 Word 报告')
+            import pypdfium2 as pdfium
+            with pdfium.PdfDocument(str(pdf)) as document:
+                result['pages']=len(document)
+                for index in range(len(document)):
+                    page=document[index]
+                    bitmap=page.render(scale=1.3)
+                    try:bitmap.to_pil().save(source.with_name(f'{result["id"]}-{index+1}.jpg'),'JPEG',quality=90)
+                    finally:bitmap.close();page.close()
+            return result
 
     def backup(self,pid):
         with self.lock:
@@ -296,6 +371,12 @@ class Handler(BaseHTTPRequestHandler):
             if url.path=='/api/download':
                 eid=identifier(query['id'][0]);path=s.path/'exports'/(eid+'.docx')
                 self.send_bytes(path.read_bytes(),'application/vnd.openxmlformats-officedocument.wordprocessingml.document',filename=query.get('name',['report.docx'])[0]);return
+            if url.path=='/api/preview-pdf':
+                eid=identifier(query['id'][0]);self.send_bytes((s.path/'exports'/(eid+'.pdf')).read_bytes(),'application/pdf');return
+            if url.path=='/api/preview-page':
+                eid=identifier(query['id'][0]);page=int(query['page'][0])
+                if page<1:raise ValueError('页码无效')
+                self.send_bytes((s.path/'exports'/f'{eid}-{page}.jpg').read_bytes(),'image/jpeg');return
             if url.path=='/api/backup':self.send_bytes(s.backup(query['id'][0]),'application/zip',filename='inspection-draft.inspection.zip');return
             if url.path=='/api/library-file':
                 source=s.path/'library.xlsx'
@@ -322,8 +403,11 @@ class Handler(BaseHTTPRequestHandler):
             if path=='/api/personnel':self.reply(s.save_personnel(json.loads(content)));return
             if path=='/api/photo':self.reply(s.upload(content,unquote(self.headers.get('X-Filename','photo.jpg'))));return
             if path=='/api/rotate':self.reply(s.rotate(json.loads(content)['id']));return
+            if path=='/api/photo-edit':
+                edit=json.loads(content);self.reply(s.edit_photo(edit['id'],edit['operations']));return
             if path=='/api/save':self.reply(s.save(json.loads(content)));return
             if path=='/api/generate':self.reply(s.export(json.loads(content)['id']));return
+            if path=='/api/preview':self.reply(s.preview(json.loads(content)['id']));return
             if path=='/api/restore':self.reply(s.restore(content));return
             if path=='/api/library':
                 library=read_library_xlsx(content)

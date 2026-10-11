@@ -22,7 +22,7 @@ def copy_licenses(target):
     shutil.copyfile(ROOT / 'LICENSE', target / 'Application.txt')
     shutil.copyfile(Path(sys.base_prefix) / 'LICENSE.txt', target / 'Python.txt')
     versions = {}
-    for name in ('Pillow', 'pillow-heif', 'lxml', 'PyInstaller', 'pyinstaller-hooks-contrib'):
+    for name in ('Pillow', 'pillow-heif', 'lxml', 'pypdfium2', 'PyInstaller', 'pyinstaller-hooks-contrib'):
         dist = importlib.metadata.distribution(name)
         versions[name] = dist.version
         files = [f for f in dist.files or [] if '.dist-info/licenses/' in str(f).replace('\\', '/')]
@@ -84,7 +84,7 @@ def package():
             shutil.copyfile(ROOT / file, source / file)
         source_tools = source / 'tools'
         source_tools.mkdir()
-        for name in ('build_workbench.py', 'package_workbench.py', 'distribution.py', 'smoke_frozen_workbench.py', 'heic_sources.json', 'build_common_word_library.mjs'):
+        for name in ('build_workbench.py', 'package_workbench.py', 'distribution.py', 'smoke_frozen_workbench.py', 'validate_reports.ps1', 'heic_sources.json', 'build_common_word_library.mjs'):
             shutil.copyfile(ROOT / 'tools' / name, source_tools / name)
         shutil.copytree(stage / 'LICENSES', source / 'LICENSES')
         third = source / 'third_party'

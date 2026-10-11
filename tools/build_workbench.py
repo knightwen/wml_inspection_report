@@ -17,6 +17,8 @@ def main():
         '--add-data', str(ROOT / 'workbench/web') + ':web',
         '--add-data', str(ROOT / 'workbench/resources') + ':resources',
         '--collect-all', 'pillow_heif',
+        '--collect-all', 'pypdfium2',
+        '--collect-all', 'pypdfium2_raw',
         '--exclude-module', 'numpy', '--exclude-module', 'scipy',
         '--exclude-module', 'matplotlib', '--exclude-module', 'pandas',
         '--exclude-module', 'torch', '--exclude-module', 'tkinter',

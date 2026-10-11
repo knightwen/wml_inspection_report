@@ -6,7 +6,7 @@ import pillow_heif
 from lxml import etree as E
 from unittest.mock import patch
 from app import Store, RESOURCES, read_library_xlsx, library_digest, LIBRARY_POLICY, atomic_json
-from report_engine import NS
+from report_engine import NS, generate_report, normalize_package, q, xml, child
 
 ROOT=Path(__file__).resolve().parents[1]
 QA=ROOT/'.build/qa'
@@ -21,6 +21,19 @@ class WorkbenchTests(unittest.TestCase):
         self.tmp=tempfile.TemporaryDirectory(dir=QA);self.store=Store(self.tmp.name);self.project=self.store.new()
 
     def tearDown(self):self.tmp.cleanup()
+
+    def test_preview_conversion_failure_preserves_draft(self):
+        import subprocess
+        photo=self.store.upload(image_bytes(),'preview.jpg')
+        self.project['items']=[self.item([photo])]
+        self.project['metadata'].update(site='Preview',report_number='PREVIEW',project_number='TEST')
+        saved=self.store.save(self.project)
+        before=self.store.path_for_project(saved['id']).read_bytes()
+        with patch('app.subprocess.run',side_effect=subprocess.TimeoutExpired('powershell',120)):
+            with self.assertRaisesRegex(ValueError,'超时'):self.store.preview(saved['id'])
+        with patch('app.subprocess.run',return_value=subprocess.CompletedProcess([],1,stderr=b'Word unavailable')):
+            with self.assertRaisesRegex(ValueError,'Microsoft Word'):self.store.preview(saved['id'])
+        self.assertEqual(before,self.store.path_for_project(saved['id']).read_bytes())
 
     def item(self,photos):
         return {'id':secrets.token_hex(16),'photos':photos,'element':'Columns','condition_rating':'5. Major deterioration',
@@ -182,5 +195,135 @@ class WorkbenchTests(unittest.TestCase):
         with self.assertRaises(ValueError):self.store.export(self.project['id'])
         ph=self.store.upload(image_bytes(),'sample.jpg');i=self.item([ph]);i['element']='';self.project['items']=[i]
         with self.assertRaises(ValueError):self.store.save(self.project)
+
+    def test_report_repairs_legacy_property_order_and_empty_dates(self):
+        # Reproduce the old template's schema errors without using write_package,
+        # which now repairs them. XML parsing alone cannot detect this corruption.
+        with zipfile.ZipFile(RESOURCES/'report_template.docx') as template:
+            parts={name:template.read(name) for name in template.namelist()}
+        doc=E.fromstring(parts['word/document.xml'])
+        child(doc.xpath('.//w:pPr[w:spacing]',namespaces=NS)[0],'pageBreakBefore',val='false')
+        cell_properties=doc.xpath('.//w:tcPr',namespaces=NS)[0]
+        child(cell_properties,'tcMar');child(cell_properties,'vAlign',val='top')
+        for parent in doc.xpath('.//w:pPr | .//w:rPr | .//w:tcPr',namespaces=NS):
+            parent[:]=list(reversed(list(parent)))
+        parts['word/document.xml']=xml(doc)
+        settings=E.fromstring(parts['word/settings.xml'])
+        update=settings.find('w:updateFields',NS);settings.remove(update);settings.append(update)
+        parts['word/settings.xml']=xml(settings)
+        core=E.fromstring(parts['docProps/core.xml'])
+        for name in ['created','modified']:
+            node=E.SubElement(core,'{http://purl.org/dc/terms/}'+name)
+            node.set('{http://www.w3.org/2001/XMLSchema-instance}type','dcterms:W3CDTF')
+        E.SubElement(core,'{http://schemas.openxmlformats.org/package/2006/metadata/core-properties}lastPrinted')
+        parts['docProps/core.xml']=xml(core)
+        legacy=Path(self.tmp.name)/'legacy-template.docx'
+        with zipfile.ZipFile(legacy,'w',zipfile.ZIP_DEFLATED) as package:
+            for name,content in parts.items():package.writestr(name,content)
+        self.project['metadata'].update(site='Legacy template test',report_number='TEST-REPAIR',project_number='TEST')
+        self.project['items']=[self.item([self.store.upload(image_bytes(),'repair.jpg')])]
+        report=QA/'legacy-template-regression.docx'
+        generate_report(legacy,self.project,self.store.photo_path,report)
+        with zipfile.ZipFile(report) as package:
+            repaired={name:package.read(name) for name in package.namelist()}
+        self.assertEqual(normalize_package(repaired),repaired)
+        doc=E.fromstring(repaired['word/document.xml'])
+        for path,earlier,later in [('.//w:pPr','keepNext','spacing'),('.//w:pPr','pageBreakBefore','spacing'),
+                                    ('.//w:rPr','color','sz'),('.//w:tcPr','tcMar','vAlign')]:
+            checked=0
+            for parent in doc.xpath(path,namespaces=NS):
+                tags=[node.tag for node in parent]
+                if q(earlier) in tags and q(later) in tags:
+                    self.assertLess(tags.index(q(earlier)),tags.index(q(later)));checked+=1
+            self.assertGreater(checked,0)
+        settings=E.fromstring(repaired['word/settings.xml']);tags=[node.tag for node in settings]
+        self.assertLess(tags.index(q('updateFields')),tags.index(q('compat')))
+        core=E.fromstring(repaired['docProps/core.xml'])
+        dates=core.findall('{http://purl.org/dc/terms/}created')+core.findall('{http://purl.org/dc/terms/}modified')
+        self.assertEqual(len(dates),2)
+        for node in dates:self.assertRegex(node.text,r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$')
+        self.assertIsNone(core.find('{http://schemas.openxmlformats.org/package/2006/metadata/core-properties}lastPrinted'))
+        self.assertIn(self.project['items'][0]['observation'],''.join(doc.xpath('.//w:t/text()',namespaces=NS)))
+        pr=E.Element(q('pPr'));child(pr,'keepNext');child(pr,'keepNext')
+        self.assertEqual(len(pr.findall(q('keepNext'))),1)
+
+    def test_photo_names_optional_preserved_in_backup_and_report(self):
+        first=self.store.upload(image_bytes(),'original.jpg');first['caption']='Column A & baseplate'
+        second=self.store.upload(image_bytes(),'other.jpg');second['caption']=''
+        self.project['metadata'].update(site='Photo names',report_number='TEST-NAMES',project_number='TEST')
+        self.project['items']=[self.item([first,second])]
+        self.project['items'][0]['severity']='Minor. Review after repainting.'
+        self.project['items'][0]['priority']='High. Repair within a month.'
+        saved=self.store.save(self.project)
+        self.assertEqual(saved['items'][0]['photos'][0]['caption'],first['caption'])
+        restored=self.store.restore(self.store.backup(saved['id']))
+        self.assertEqual([p['caption'] for p in restored['items'][0]['photos']],[first['caption'],''])
+        self.assertEqual(restored['items'][0]['severity'],self.project['items'][0]['severity'])
+        result=self.store.export(saved['id']);report=self.store.path/'exports'/(result['id']+'.docx')
+        (QA/'photo-names.docx').write_bytes(report.read_bytes())
+        with zipfile.ZipFile(report) as package:
+            doc=E.fromstring(package.read('word/document.xml'))
+        text=doc.xpath('.//w:t/text()',namespaces=NS)
+        self.assertEqual(text.count(first['caption']),1)
+        self.assertNotIn('other.jpg',text)
+        for invalid in [None,3,'x'*201]:
+            edited=json.loads(json.dumps(saved));edited['items'][0]['photos'][0]['caption']=invalid
+            with self.assertRaises(ValueError):self.store.save(edited)
+
+    def test_crop_annotation_preserves_source_and_survives_backup(self):
+        photo=self.store.upload(image_bytes(),'original.jpg')
+        source=self.store.photo_path(photo['id']).read_bytes()
+        edited=self.store.edit_photo(photo['id'],[{'type':'crop','box':[100,50,700,550]},
+                                                {'type':'circle','box':[50,40,250,240]}])
+        self.assertNotEqual(edited['id'],photo['id'])
+        self.assertEqual(self.store.photo_path(photo['id']).read_bytes(),source)
+        self.assertEqual((self.store.path/'originals'/(edited['id']+'.jpg')).read_bytes(),image_bytes())
+        with Image.open(self.store.photo_path(edited['id'])) as image:
+            self.assertEqual(image.size,(600,500))
+            red,green,blue=image.getpixel((150,40));self.assertGreater(red,green+50)
+        edited['caption']='Column A';self.project['items']=[self.item([edited])]
+        self.project['metadata'].update(site='Photo edit',report_number='QA-EDIT',project_number='QA')
+        self.store.save(self.project)
+        report=self.store.export(self.project['id'])
+        report_file=self.store.path/'exports'/(report['id']+'.docx')
+        (QA/'edited-photo.docx').write_bytes(report_file.read_bytes())
+        with zipfile.ZipFile(report_file) as package:
+            self.assertEqual(package.read('word/media/inspection-1-1.jpg'),self.store.photo_path(edited['id']).read_bytes())
+        restored=self.store.restore(self.store.backup(self.project['id']))
+        restored_photo=restored['items'][0]['photos'][0]
+        self.assertEqual(restored_photo['caption'],'Column A')
+        self.assertEqual(self.store.photo_path(restored_photo['id']).read_bytes(),self.store.photo_path(edited['id']).read_bytes())
+        count=len(self.store.catalog)
+        for operations in [[],[{'type':'crop','box':[-1,0,500,400]}],[{'type':'crop','box':[0,0,5,5]}],
+                           [{'type':'circle','box':[0,0,900,500]}],[{'type':'crop','box':[0,0,float('nan'),500]}],
+                           [{'type':'other','box':[0,0,100,100]}]]:
+            with self.assertRaises(ValueError):self.store.edit_photo(photo['id'],operations)
+        self.assertEqual(len(self.store.catalog),count)
+
+    def test_photo_markup_rotation_and_invalid_operations(self):
+        photo=self.store.upload(image_bytes(),'markup.jpg')
+        original=self.store.photo_path(photo['id']).read_bytes()
+        edited=self.store.edit_photo(photo['id'],[
+            {'type':'rotate','turn':1},
+            {'type':'crop','box':[0,0,400,700]},
+            {'type':'rectangle','box':[30,30,150,150],'color':'#1677ff','width':10},
+            {'type':'arrow','box':[300,300,200,200],'color':'#e32636','width':8},
+            {'type':'pen','points':[[20,500],[100,500],[180,550]],'color':'#f5c400','width':12}])
+        with Image.open(self.store.photo_path(edited['id'])) as image:
+            self.assertEqual(image.size,(400,700))
+            r,g,b=image.getpixel((80,33));self.assertGreater(b,r+80)
+            r,g,b=image.getpixel((250,250));self.assertGreater(r,g+80)
+            r,g,b=image.getpixel((80,500));self.assertGreater(r,b+100)
+        self.assertEqual(original,self.store.photo_path(photo['id']).read_bytes())
+        count=len(self.store.catalog)
+        invalid=[{'type':'rotate','turn':True},{'type':'rotate','turn':2},
+                 {'type':'arrow','box':[0,0,800,600]},
+                 {'type':'rectangle','box':[0,0,30,30],'color':'bad'},
+                 {'type':'circle','box':[0,0,30,30],'width':True},
+                 {'type':'pen','points':[[0,0],[float('inf'),10]]},
+                 {'type':'pen','points':[[0,0],[800,0]]}]
+        for operation in invalid:
+            with self.assertRaises(ValueError):self.store.edit_photo(photo['id'],[operation])
+        self.assertEqual(count,len(self.store.catalog))
 
 if __name__=='__main__':unittest.main(verbosity=2)

@@ -161,10 +161,9 @@
     "Very unlikely"
   ],
   "severity": [
-    "Critical. Recommended to replace where has been damaged prior to cyclonic season.",
+    "Critical",
     "Minor",
     "Moderate",
-    "Moderate. Recommended to be replaced prior to cyclonic season.",
     "Negligible",
     "Severe",
     "Significant"
