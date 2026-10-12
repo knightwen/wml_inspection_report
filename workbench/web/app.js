@@ -2,6 +2,7 @@
 const $=id=>document.getElementById(id);
 const t=(...args)=>WorkbenchI18n.t(...args);
 const photoCountText=(count,short=false)=>WorkbenchI18n.language==='en'?count+(count===1?' photo':' photos'):count+(short?' 张':' 张照片');
+const subitemCountText=count=>WorkbenchI18n.language==='en'?count+(count===1?' subitem':' subitems'):t('{0} 个子项',count);
 const fields=['element','condition_rating','likelihood','severity','priority'];
 const sectionLabels={introduction:t('Introduction · 项目介绍'),remedial_works:t('Recommended Remedial Works · 修复工程建议'),conclusion:t('Conclusion · 结论'),cost_estimate:t('Cost Estimate · 费用估算说明')};
 const labels={element:t('Element · 构件'),condition_rating:t('Condition Rating · 状况'),likelihood:t('Likelihood · 发生可能性'),severity:t('Severity · 严重程度'),priority:t('Priority · 处理优先级')};
@@ -11,7 +12,12 @@ let boot,project=null,busy=false,toastTimer,saver,previewJob=null,previewTimer;
 let personnelEditorId=null,personnelDirty=false;
 let itemDrag=null;
 let photoEditor=null;
-const blankEditor=()=>({photos:[],...Object.fromEntries([...fields,'observation','recommendation'].map(k=>[k,'']))});
+let activeSubitemId=null;
+const blankSubitem=()=>({id:crypto.randomUUID().replaceAll('-',''),photos:[],observation:'',recommendation:''});
+const blankEditor=()=>({...Object.fromEntries(fields.map(k=>[k,''])),subitems:[blankSubitem()]});
+const itemPhotos=item=>item.subitems.flatMap(group=>group.photos);
+function currentSubitem(){return project.editor.subitems.find(group=>group.id===activeSubitemId)||project.editor.subitems[0];}
+function photoRange(item,index,parentNumber){const start=item.subitems.slice(0,index).reduce((n,g)=>n+g.photos.length,0)+1,count=item.subitems[index].photos.length;return count?parentNumber+'.'+start+(count>1?'–'+parentNumber+'.'+(start+count-1):''):'—';}
 function node(tag,text,className){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(className)n.className=className;return n;}
 function toast(text){$('toast').textContent=t(text);$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,6500);}
 function status(text,error=false){$('saveStatus').textContent=t(text);$('saveStatus').classList.toggle('error',error);}
@@ -42,7 +48,7 @@ async function downloadRecovery(){
  if(!response.ok)throw new Error(t((await response.json()).error));
  const url=URL.createObjectURL(await response.blob()),a=node('a');a.href=url;a.download='unsaved-draft.inspection.zip';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast(t('当前修改与照片已下载；完成冲突处理前，请保留当前页面。'));
 }
-function setBusy(value){busy=value;for(const id of ['newProject','projectSelect','saveSections','saveItem','previewButton','generateButton','backupButton','restoreButton','resetEditor','exitButton','libraryButton','managePersonnel','savePersonnel','deletePersonnel','newPersonnel','closePersonnel','languageSelect'])if($(id))$(id).disabled=value;if($('reportSummary'))updateSummary();if(photoEditor)renderPhotoEditor();}
+function setBusy(value){busy=value;for(const id of ['newProject','projectSelect','saveSections','saveItem','addSubitem','previewButton','generateButton','backupButton','restoreButton','resetEditor','exitButton','libraryButton','managePersonnel','savePersonnel','deletePersonnel','newPersonnel','closePersonnel','languageSelect'])if($(id))$(id).disabled=value;if($('reportSummary'))updateSummary();if(photoEditor)renderPhotoEditor();}
 function action(fn){return async event=>{if(busy)return;setBusy(true);try{await fn(event);}catch(e){toast(e.message);}finally{setBusy(false);}};}
 function confirmAction(title,text){
  $('confirmTitle').textContent=title;$('confirmText').textContent=text;const d=$('confirmDialog');d.showModal();
@@ -78,11 +84,11 @@ function buildFields(){
   $(key+'Search').addEventListener('input',()=>renderLibrary(key));
   $(key+'Select').addEventListener('change',()=>{
    const selected=boot.library[key].find(r=>r.id===$(key+'Select').value);if(!selected)return;
-   project.editor[key]=selected.text;project.editor[key+'_source']=selected.id;
+   currentSubitem()[key]=selected.text;currentSubitem()[key+'_source']=selected.id;
    $(key+'Search').value='';renderLibrary(key);$(key+'Select').value=selected.id;
-   $(key+'Text').value=selected.text;$(key+'Source').textContent=t('来源 ')+selected.id+t(' · 可继续编辑');scheduleSave();
+   $(key+'Text').value=selected.text;$(key+'Source').textContent=t('来源 ')+selected.id+t(' · 可继续编辑');renderSubitems();scheduleSave();
   });
-  $(key+'Text').addEventListener('input',()=>{project.editor[key]=$(key+'Text').value;scheduleSave();});
+  $(key+'Text').addEventListener('input',()=>{currentSubitem()[key]=$(key+'Text').value;renderSubitems();scheduleSave();});
  }
 }
 function costValue(row){
@@ -202,7 +208,7 @@ function updateTitle(){
 }
 function updateSummary(){
  if(!project)return;
- const count=project.items.length,photos=project.items.reduce((n,i)=>n+i.photos.length,0);
+ const count=project.items.length,photos=project.items.reduce((n,i)=>n+itemPhotos(i).length,0);
  $('itemCount').textContent=count;$('reportSummary').textContent=count?(WorkbenchI18n.language==='en'?count+(count===1?' inspection item':' inspection items')+' · '+photoCountText(photos):t("{0} 个检查项 · {1} 张照片",count,photos)):t('还没有已保存的检查项');
  $('generateButton').disabled=busy||count===0;$('previewButton').disabled=busy||count===0;$('previewButton').textContent=previewJob?t('查看预览进度 / 结果'):t('预览报告');
 }
@@ -212,39 +218,68 @@ function renderProjects(){
  if(project){if(!boot.projects.some(p=>p.id===project.id)){const op=node('option',project.metadata.site||t('新的检查报告'));op.value=project.id;select.prepend(op);}select.value=project.id;}
 }
 function renderEditor(){
+ activeSubitemId=currentSubitem().id;
  for(const key of fields){
   const value=project.editor[key]||'',custom=!!value&&!boot.options[key].includes(value);
   $('rating_'+key).value=custom?'__manual__':value;
   $('manual_rating_'+key).hidden=!custom;$('manual_rating_'+key).value=value;
  }
  for(const key of ['observation','recommendation']){
-  $(key+'Text').value=project.editor[key]||'';$(key+'Search').value='';renderLibrary(key);
-  $(key+'Select').value=project.editor[key+'_source']||'';
-  $(key+'Source').textContent=project.editor[key+'_source']?t('来源 ')+project.editor[key+'_source']+t(' · 可继续编辑'):t('手动输入');
+  $(key+'Text').value=currentSubitem()[key]||'';$(key+'Search').value='';renderLibrary(key);
+  $(key+'Select').value=currentSubitem()[key+'_source']||'';
+  $(key+'Source').textContent=currentSubitem()[key+'_source']?t('来源 ')+currentSubitem()[key+'_source']+t(' · 可继续编辑'):t('手动输入');
  }
  updateEditorTitle();
- $('editingBadge').hidden=!project.editor_id;$('saveItem').textContent=project.editor_id?t('Save · 保存修改'):t('Save · 保存检查项');renderPhotos();
+ $('editingBadge').hidden=!project.editor_id;$('saveItem').textContent=project.editor_id?t('Save · 保存修改'):t('Save · 保存检查项');renderPhotos();renderSubitems();
+}
+function renderSubitems(){
+ clearItemDrag();const list=$('subitemList');list.replaceChildren();
+ const item=project.editor,parentNumber=project.editor_id?project.items.findIndex(i=>i.id===project.editor_id)+1:project.items.length+1;
+ item.subitems.forEach((group,index)=>{
+  const row=node('div',undefined,'subitem-card');row.dataset.itemId=group.id;row.dataset.dropLabel=t('松开鼠标放到这里');row.classList.toggle('selected',group.id===currentSubitem().id);
+  const grip=node('button','⠿','subitem-grip');grip.type='button';grip.disabled=item.subitems.length<2;grip.setAttribute('aria-label',t('拖动排序子项 {0}',index+1));bindItemDrag(grip,row,group.id,list,moveSubitem);row.append(grip);
+  const select=node('button',undefined,'subitem-select');select.type='button';select.setAttribute('aria-pressed',String(group.id===currentSubitem().id));
+  if(group.photos.length){const image=node('img');image.src='/photos/'+group.photos[0].id+'.jpg';image.alt='';select.append(image);}
+  const text=node('span',undefined,'subitem-card-text');text.append(node('strong',t('子项 {0}',index+1)),node('small',group.observation||t('填写这组照片的现场描述')));select.append(text,node('span',photoRange(item,index,parentNumber)+' · '+photoCountText(group.photos.length),'subitem-photo-range'));
+  select.onclick=()=>{if(!busy){activeSubitemId=group.id;renderEditor();}};row.append(select);
+  const controls=node('div',undefined,'subitem-actions');
+  for(const [label,title,disabled,fn] of [
+   ['↑',t('子项前移'),index===0,()=>moveSubitem(group.id,item.subitems[index-1].id)],
+   ['↓',t('子项后移'),index===item.subitems.length-1,()=>moveSubitem(group.id,item.subitems[index+1].id,true)],
+   ['×',t('删除子项'),item.subitems.length===1,async()=>{if((group.photos.length||group.observation||group.recommendation)&&!(await confirmAction(t('删除子项'),t('删除这组照片和描述？原始照片仍保留在本地。'))))return;item.subitems.splice(index,1);if(activeSubitemId===group.id)activeSubitemId=item.subitems[Math.min(index,item.subitems.length-1)].id;renderEditor();await flush();}]
+  ]){const button=node('button',label);button.type='button';button.title=title;button.setAttribute('aria-label',title+' '+(index+1));button.disabled=disabled;button.onclick=action(fn);controls.append(button);}
+  row.append(controls);list.append(row);
+ });
+ const index=item.subitems.findIndex(g=>g.id===currentSubitem().id);
+ $('activeSubitemTitle').textContent=t('编辑子项 {0}',index+1);
+ $('activeSubitemRange').textContent=t('照片编号：{0}',photoRange(item,index,parentNumber));
+}
+async function moveSubitem(id,targetId,after=false){
+ const groups=project.editor.subitems,from=groups.findIndex(g=>g.id===id),target=groups.findIndex(g=>g.id===targetId);if(from<0||target<0||from===target)return;
+ let to=target+(after?1:0);if(from<to)to--;if(from===to)return;
+ const previous=[...groups],[group]=groups.splice(from,1);groups.splice(to,0,group);renderEditor();
+ try{await flush();}catch(error){if(error.code!=='revision_conflict')project.editor.subitems=previous;renderEditor();throw error;}
 }
 function renderPhotos(){
- const grid=$('photoGrid');grid.replaceChildren();$('photoCount').textContent=photoCountText(project.editor.photos.length,true);
- project.editor.photos.forEach((photo,index)=>{
+ const group=currentSubitem(),grid=$('photoGrid');grid.replaceChildren();$('photoCount').textContent=photoCountText(group.photos.length,true);
+ group.photos.forEach((photo,index)=>{
   const card=node('div',undefined,'photo-card');const image=node('img');image.src='/photos/'+photo.id+'.jpg';image.alt=photo.caption||photo.name;image.loading='lazy';
   const name=node('span',`${index+1}. ${photo.name}`,'name');name.title=photo.name;const controls=node('div',undefined,'photo-controls');
   const caption=node('input');caption.className='photo-caption';caption.value=photo.caption||'';caption.maxLength=200;caption.placeholder=t('照片名称（可留空）');caption.setAttribute('aria-label',t('照片 ')+(index+1)+t(' 名称'));
   caption.addEventListener('input',()=>{photo.caption=caption.value;image.alt=photo.caption||photo.name;scheduleSave();});
   for(const [label,title,fn] of [
-   ['←',t('照片前移'),()=>{if(index>0)[project.editor.photos[index-1],project.editor.photos[index]]=[photo,project.editor.photos[index-1]];renderPhotos();scheduleSave();}],
-   ['→',t('照片后移'),()=>{if(index<project.editor.photos.length-1)[project.editor.photos[index+1],project.editor.photos[index]]=[photo,project.editor.photos[index+1]];renderPhotos();scheduleSave();}],
+   ['←',t('照片前移'),()=>{if(index>0)[group.photos[index-1],group.photos[index]]=[photo,group.photos[index-1]];renderPhotos();renderSubitems();scheduleSave();}],
+   ['→',t('照片后移'),()=>{if(index<group.photos.length-1)[group.photos[index+1],group.photos[index]]=[photo,group.photos[index+1]];renderPhotos();renderSubitems();scheduleSave();}],
    [t('编辑'),t('编辑照片'),()=>openPhotoEditor(photo,index)],
-   ['↻',t('顺时针旋转照片'),async()=>{const p=await api('/api/rotate',{id:photo.id});project.editor.photos[index]={...photo,...p};renderPhotos();await flush();}],
-   ['×',t('移除当前照片'),()=>{project.editor.photos.splice(index,1);renderPhotos();scheduleSave();}]
+   ['↻',t('顺时针旋转照片'),async()=>{const p=await api('/api/rotate',{id:photo.id});group.photos[index]={...photo,...p};renderPhotos();renderSubitems();await flush();}],
+   ['×',t('移除当前照片'),()=>{group.photos.splice(index,1);renderPhotos();renderSubitems();scheduleSave();}]
   ]){const b=node('button',label);b.title=title;b.setAttribute('aria-label',title);b.onclick=action(fn);controls.append(b);}
   card.append(image,name,caption,controls);grid.append(card);
  });
 }
 async function openPhotoEditor(photo,index){
  const image=new Image();image.src='/photos/'+photo.id+'.jpg';await image.decode();
- photoEditor={image,index,photoId:photo.id,projectId:project.id,operations:[],redo:[],tool:'crop',selection:null,drag:null,zoom:1};
+ photoEditor={image,index,subitemId:currentSubitem().id,photoId:photo.id,projectId:project.id,operations:[],redo:[],tool:'crop',selection:null,drag:null,zoom:1};
  $('photoCropRatio').value='0';$('photoMarkColor').value='#e32636';$('photoMarkWidth').value='1';
  $('photoEditorDialog').showModal();setPhotoCrop();renderPhotoEditor();
 }
@@ -366,11 +401,12 @@ function setupPhotoEditor(){
  $('savePhotoEdit').onclick=action(async()=>{
   const edit=photoEditor;if(!edit?.operations.length)return;
   if(edit.drag)throw new Error(t('请完成当前操作后保存'));
-  if(project.id!==edit.projectId||project.editor.photos[edit.index]?.id!==edit.photoId)throw new Error(t('照片已改变，请重新打开编辑窗口'));
+  const group=project.editor.subitems.find(g=>g.id===edit.subitemId);
+  if(project.id!==edit.projectId||group?.photos[edit.index]?.id!==edit.photoId)throw new Error(t('照片已改变，请重新打开编辑窗口'));
   const saved=await api('/api/photo-edit',{id:edit.photoId,operations:edit.operations});
-  const previous=project.editor.photos[edit.index];project.editor.photos[edit.index]={...previous,...saved};
-  try{await flush();}catch(error){if(error.code!=='revision_conflict')project.editor.photos[edit.index]=previous;throw error;}
-  $('photoEditorDialog').close();photoEditor=null;renderPhotos();toast(t('照片已保存；点击 Save 将修改加入检查项。'));
+  const previous=group.photos[edit.index];group.photos[edit.index]={...previous,...saved};
+  try{await flush();}catch(error){if(error.code!=='revision_conflict')group.photos[edit.index]=previous;throw error;}
+  $('photoEditorDialog').close();photoEditor=null;renderPhotos();renderSubitems();toast(t('照片已保存；点击 Save 将修改加入检查项。'));
  });
 }
 function updateEditorTitle(){$('editorTitle').textContent=project.editor_id?t('编辑检查项 ')+(project.items.findIndex(i=>i.id===project.editor_id)+1):t('整理一个检查项');}
@@ -381,11 +417,11 @@ function clearItemDrag(){
  previous?.ghost?.remove();
  if(previous?.handle.hasPointerCapture(previous.pointerId))previous.handle.releasePointerCapture(previous.pointerId);
  document.body.classList.remove('item-sorting');
- for(const row of $('savedItems').children){row.classList.remove('dragging');row.style.removeProperty('transform');}
+ for(const row of previous?.container?.children||[]){row.classList.remove('dragging');row.style.removeProperty('transform');}
 }
 function itemDragTarget(){
  if(!itemDrag?.active)return;
- const drag=itemDrag,bounds=$('savedItems').getBoundingClientRect(),y=drag.y+window.scrollY;
+ const drag=itemDrag,bounds=drag.container.getBoundingClientRect(),y=drag.y+window.scrollY;
  const inside=drag.x>=bounds.left&&drag.x<=bounds.right&&drag.y>=bounds.top-24&&drag.y<=bounds.bottom+24;
  const others=drag.rows.filter(entry=>entry.id!==drag.id);
  // Use original document coordinates so animated rows never move the hit targets.
@@ -395,7 +431,7 @@ function itemDragTarget(){
  drag.position=position;
  const ordered=[...others];ordered.splice(position,0,drag.rows[drag.originalIndex]);
  let top=drag.rows[0].top;
- for(const entry of ordered){entry.row.style.transform=`translate3d(0,${top-entry.top}px,0)`;top+=entry.height;}
+ for(const entry of ordered){entry.row.style.transform=`translate3d(0,${top-entry.top}px,0)`;top+=entry.height+drag.gap;}
 }
 function scrollItemDrag(){
  if(!itemDrag?.active)return;
@@ -408,12 +444,34 @@ function startItemDrag(row){
  ghost.classList.remove('dragging');ghost.classList.add('item-drag-preview');ghost.setAttribute('aria-hidden','true');ghost.inert=true;
  ghost.style.width=bounds.width+'px';ghost.style.left='0';ghost.style.top='0';document.body.append(ghost);
  itemDrag.ghost=ghost;itemDrag.offsetX=itemDrag.startX-bounds.left;itemDrag.offsetY=itemDrag.startY-bounds.top;
- itemDrag.rows=[...$('savedItems').children].map(row=>{const rect=row.getBoundingClientRect();return {row,id:row.dataset.itemId,top:rect.top+window.scrollY,height:rect.height};});
+ itemDrag.rows=[...itemDrag.container.children].map(row=>{const rect=row.getBoundingClientRect();return {row,id:row.dataset.itemId,top:rect.top+window.scrollY,height:rect.height};});
+ itemDrag.gap=itemDrag.rows.length>1?itemDrag.rows[1].top-itemDrag.rows[0].top-itemDrag.rows[0].height:0;
  itemDrag.originalIndex=itemDrag.rows.findIndex(entry=>entry.id===itemDrag.id);itemDrag.position=itemDrag.originalIndex;
  row.classList.add('dragging');document.body.classList.add('item-sorting');updateItemDragPreview();scrollItemDrag();
 }
 function updateItemDragPreview(){
  if(itemDrag?.ghost)itemDrag.ghost.style.transform=`translate3d(${itemDrag.x-itemDrag.offsetX}px,${itemDrag.y-itemDrag.offsetY}px,0) scale(1.015)`;
+}
+function bindItemDrag(handle,row,id,container,move){
+ handle.addEventListener('pointerdown',event=>{
+  if(event.button!==0||busy||handle.disabled)return;
+  event.preventDefault();handle.focus();
+  itemDrag={id,container,projectId:project.id,pointerId:event.pointerId,handle,startX:event.clientX,startY:event.clientY,x:event.clientX,y:event.clientY,active:false};handle.setPointerCapture(event.pointerId);
+ });
+ handle.addEventListener('pointermove',event=>{
+  if(!itemDrag||itemDrag.pointerId!==event.pointerId)return;
+  itemDrag.x=event.clientX;itemDrag.y=event.clientY;
+  if(!itemDrag.active&&Math.hypot(itemDrag.x-itemDrag.startX,itemDrag.y-itemDrag.startY)>5){itemDrag.active=true;startItemDrag(row);}
+  updateItemDragPreview();itemDragTarget();
+ });
+ handle.addEventListener('pointerup',event=>{
+  if(!itemDrag||itemDrag.pointerId!==event.pointerId)return;
+  itemDrag.x=event.clientX;itemDrag.y=event.clientY;itemDragTarget();
+  const source=itemDrag;clearItemDrag();
+  if(source.active&&source.target&&source.projectId===project.id)action(()=>move(source.id,source.target.id,source.target.after))();
+ });
+ handle.addEventListener('pointercancel',clearItemDrag);handle.addEventListener('lostpointercapture',clearItemDrag);
+ handle.addEventListener('keydown',event=>{if(event.key==='Escape')clearItemDrag();});
 }
 async function moveItem(id,targetId,after=false){
  const from=project.items.findIndex(item=>item.id===id),target=project.items.findIndex(item=>item.id===targetId);
@@ -427,33 +485,14 @@ function renderItems(){
  const list=$('savedItems');list.replaceChildren();
  if(!project.items.length){const empty=node('div',undefined,'empty-state');empty.append(node('strong',t('现场发现，从第一张照片开始。')),node('p',t('保存的检查项会出现在这里，可以编辑、调整顺序，然后一起生成报告。')));list.append(empty);}
  project.items.forEach((item,index)=>{
-  const row=node('article',undefined,'saved-item');row.dataset.itemId=item.id;
+  const row=node('article',undefined,'saved-item');row.dataset.itemId=item.id;row.dataset.dropLabel=t('松开鼠标放到这里');
   const handle=node('button',undefined,'item-number item-drag-handle');handle.type='button';handle.disabled=project.items.length<2;
   handle.title=t('拖动排序');handle.setAttribute('aria-label',t('拖动排序检查项 ')+(index+1));handle.append(node('span','⠿','item-grip'),node('span',String(index+1).padStart(2,'0')));row.append(handle);
-  handle.addEventListener('pointerdown',event=>{
-   if(event.button!==0||busy||project.items.length<2)return;
-   event.preventDefault();handle.focus();
-   itemDrag={id:item.id,projectId:project.id,pointerId:event.pointerId,handle,startX:event.clientX,startY:event.clientY,x:event.clientX,y:event.clientY,active:false};handle.setPointerCapture(event.pointerId);
-  });
-  handle.addEventListener('pointermove',event=>{
-   if(!itemDrag||itemDrag.pointerId!==event.pointerId)return;
-   itemDrag.x=event.clientX;itemDrag.y=event.clientY;
-   if(!itemDrag.active&&Math.hypot(itemDrag.x-itemDrag.startX,itemDrag.y-itemDrag.startY)>5){itemDrag.active=true;startItemDrag(row);}
-   updateItemDragPreview();
-   itemDragTarget();
-  });
-  handle.addEventListener('pointerup',event=>{
-   if(!itemDrag||itemDrag.pointerId!==event.pointerId)return;
-   itemDrag.x=event.clientX;itemDrag.y=event.clientY;itemDragTarget();
-   const source=itemDrag;clearItemDrag();
-   if(source.active&&source.target&&source.projectId===project.id)action(()=>moveItem(source.id,source.target.id,source.target.after))();
-  });
-  handle.addEventListener('pointercancel',clearItemDrag);handle.addEventListener('lostpointercapture',clearItemDrag);
-  handle.addEventListener('keydown',event=>{if(event.key==='Escape')clearItemDrag();});
-  const image=node('img');image.src='/photos/'+item.photos[0].id+'.jpg';image.alt=item.photos[0].caption||item.photos[0].name;image.className='item-photo';image.draggable=false;row.append(image);
-  const obs=node('div',undefined,'item-content');obs.append(node('strong',item.element),node('p',item.observation));
-  const meta=node('div',undefined,'item-meta');const priority=node('span',item.priority,'priority');priority.dataset.priority=item.priority;meta.append(priority,node('span',photoCountText(item.photos.length)),node('span',item.condition_rating));obs.append(meta);row.append(obs);
-  const rec=node('div',undefined,'item-content');rec.append(node('strong','Recommendation'),node('p',item.recommendation||'—'));row.append(rec);
+  bindItemDrag(handle,row,item.id,list,moveItem);
+  const photos=itemPhotos(item),first=photos[0];const image=node('img');image.src='/photos/'+first.id+'.jpg';image.alt=first.caption||first.name;image.className='item-photo';image.draggable=false;row.append(image);
+  const obs=node('div',undefined,'item-content');obs.append(node('strong',item.element),node('p',subitemCountText(item.subitems.length)));
+  const meta=node('div',undefined,'item-meta');const priority=node('span',item.priority,'priority');priority.dataset.priority=item.priority;meta.append(priority,node('span',photoCountText(photos.length)),node('span',item.condition_rating));obs.append(meta);row.append(obs);
+  const rec=node('div',undefined,'item-content');rec.append(node('strong',t('共用评级')),node('p',item.likelihood+' · '+item.severity));row.append(rec);
   const actions=node('div',undefined,'item-actions');
   for(const [label,fn] of [
    [t('编辑'),async()=>{if(editorHasContent()&&project.editor_id!==item.id&&!(await confirmAction(t('切换到已保存项'),t('当前编辑区已自动保存。切换后会替换编辑区内容，请先保存需要加入报告的检查项。'))))return;project.editor=structuredClone(item);delete project.editor.id;project.editor_id=item.id;renderEditor();await flush();$('editorTitle').scrollIntoView({behavior:'smooth',block:'center'});}],
@@ -461,17 +500,22 @@ function renderItems(){
    ['↓',async()=>{if(index<project.items.length-1)await moveItem(item.id,project.items[index+1].id,true);}],
    [t('删除'),async()=>{if(!(await confirmAction(t('删除检查项'),t("从报告中删除第 {0} 项？原始照片仍保存在本地。",index+1))))return;project.items.splice(index,1);if(project.editor_id===item.id){project.editor=blankEditor();project.editor_id=null;renderEditor();}renderItems();await flush();}]
   ]){const b=node('button',label);b.onclick=action(fn);b.setAttribute('aria-label',label+t('检查项 ')+(index+1));actions.append(b);}
-  row.append(actions);list.append(row);
+  row.append(actions);
+  const groups=node('div',undefined,'saved-subitems');item.subitems.forEach((group,gi)=>{
+   const detail=node('div',undefined,'saved-subitem'),pictures=node('div',undefined,'saved-subitem-photos');
+   for(const photo of group.photos){const thumb=node('img');thumb.src='/photos/'+photo.id+'.jpg';thumb.alt=photo.caption||photo.name;thumb.loading='lazy';pictures.append(thumb);}
+   const content=node('div');content.append(node('strong',t('子项 {0}',gi+1)+' · '+photoRange(item,gi,index+1)),node('p',group.observation));if(group.recommendation)content.append(node('p','Recommendation — '+group.recommendation));detail.append(pictures,content);groups.append(detail);
+  });row.append(groups);list.append(row);
  });updateSummary();updateEditorTitle();
 }
-function editorHasContent(){return project.editor.photos.length||project.editor.observation||project.editor.recommendation;}
-function loadProject(value){project=value;project.sections??={};project.cost_rows??=[];renderCosts();saver.reset(value.revision);for(const key of Object.keys(sectionLabels))$('section_'+key).value=project.sections[key]||'';for(const key of Object.keys(metadataLabels))if(!personRoles[key])$('meta_'+key).value=project.metadata[key]||'';renderPersonChoices();updateTitle();renderEditor();renderItems();renderProjects();}
+function editorHasContent(){return project.editor.subitems.some(g=>g.photos.length||g.observation||g.recommendation);}
+function loadProject(value){project=value;activeSubitemId=null;project.sections??={};project.cost_rows??=[];renderCosts();saver.reset(value.revision);for(const key of Object.keys(sectionLabels))$('section_'+key).value=project.sections[key]||'';for(const key of Object.keys(metadataLabels))if(!personRoles[key])$('meta_'+key).value=project.metadata[key]||'';renderPersonChoices();updateTitle();renderEditor();renderItems();renderProjects();}
 async function uploadPhotos(files){
- if(!files.length)return;if(project.editor.photos.length+files.length>100)throw new Error(t('一个检查项最多 100 张照片'));
- const failures=[];
+ if(!files.length)return;if(itemPhotos(project.editor).length+files.length>100)throw new Error(t('一个检查项最多 100 张照片'));
+ const group=currentSubitem(),failures=[];
  for(let i=0;i<files.length;i++){
   const file=files[i];$('editorHint').textContent=t("正在导入 {0} / {1}：{2}",i+1,files.length,file.name);
-  try{const photo=await api('/api/photo',file,{'X-Filename':encodeURIComponent(file.name)});project.editor.photos.push(photo);renderPhotos();await persist();}
+  try{const photo=await api('/api/photo',file,{'X-Filename':encodeURIComponent(file.name)});group.photos.push(photo);renderPhotos();renderSubitems();await persist();}
   catch(e){failures.push(file.name+'：'+e.message);}
  }
  $('editorHint').textContent=t('已导入照片。填写描述与评级后，保存检查项。');
@@ -480,9 +524,8 @@ async function uploadPhotos(files){
 }
 async function saveItem(){
  const e=project.editor;
- if(!e.photos.length)throw new Error(t('请先加入照片'));
  if(fields.some(key=>!e[key]?.trim()))throw new Error(t('请填写 Element 和四项评级，可下拉选择或手动输入'));
- if(!e.observation.trim())throw new Error(t('请填写 Observation'));
+ for(const [index,group] of e.subitems.entries()){if(!group.photos.length||!group.observation.trim()){activeSubitemId=group.id;renderEditor();throw new Error(t('子项 {0} 需要照片和 Observation',index+1));}}
  const item={...structuredClone(e),id:project.editor_id||crypto.randomUUID().replaceAll('-','')};
  const index=project.items.findIndex(i=>i.id===item.id),previousItem=index>=0?structuredClone(project.items[index]):null;if(index>=0)project.items[index]=item;else project.items.push(item);
  const previous=structuredClone(project.editor);const previousId=project.editor_id;
@@ -550,6 +593,7 @@ async function init(){
  loadProject(chosen?await api('/api/project?id='+chosen.id):await api('/api/new',{}));localStorage.setItem('lastProject',project.id);
  try{const previous=JSON.parse(sessionStorage.getItem('workbenchLanguagePreview'));if(previous?.project===project.id){previewJob=previous.job;updateSummary();}sessionStorage.removeItem('workbenchLanguagePreview');}catch{}
  $('saveItem').onclick=action(saveItem);
+ $('addSubitem').onclick=action(async()=>{if(project.editor.subitems.length>=100)throw new Error(t('每个检查项需要 1 至 100 个子项'));const group=blankSubitem();project.editor.subitems.push(group);activeSubitemId=group.id;renderEditor();await flush();});
  $('newProject').onclick=action(async()=>{await flush();loadProject(await api('/api/new',{}));boot.projects=(await api('/api/bootstrap')).projects;renderProjects();localStorage.setItem('lastProject',project.id);$('reportDetails').open=true;});
  $('projectSelect').onchange=action(async e=>{const id=e.target.value;await flush();loadProject(await api('/api/project?id='+id));localStorage.setItem('lastProject',id);});
  $('resetEditor').onclick=action(async()=>{if(editorHasContent()&&!(await confirmAction(t('清空当前编辑区'),t('已保存检查项保持不变。当前编辑区的照片和未保存文字会从草稿中移除。'))))return;project.editor=blankEditor();project.editor_id=null;renderEditor();await flush();});

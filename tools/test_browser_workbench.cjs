@@ -7,6 +7,7 @@ const server=spawn(python,[path.join(__dirname,'browser_test_server.py'),'--data
 let browser,context,state,base,errors=[];
 const saved=page=>page.locator('#saveStatus').filter({hasText:'已保存到本地'}).waitFor();
 async function seedItem(page,text,fixture){
+ await page.waitForFunction(()=>!document.querySelector('#saveItem').disabled);
  await page.locator('#photoFiles').setInputFiles(fixture);await page.locator('#photoGrid img').first().waitFor();
  for(const [key,value] of Object.entries({element:'Columns',condition_rating:'5. Major deterioration',likelihood:'Likely',severity:'Severe',priority:'High'}))await page.locator('#rating_'+key).selectOption(value);
  await page.locator('#observationText').fill(text);await page.locator('#recommendationText').fill('Repair the recorded condition.');
@@ -35,7 +36,13 @@ async function seedItem(page,text,fixture){
  const fixture=path.join(qa,'upload-fixtures','landscape.jpg');await seedItem(page,'FIRST browser condition',fixture);
  await page.locator('#photoGrid button').filter({hasText:'编辑'}).first().click();await page.locator('#photoToolCircle').click();
  const canvas=await page.locator('#photoEditCanvas').boundingBox();await page.mouse.move(canvas.x+canvas.width*.25,canvas.y+canvas.height*.25);await page.mouse.down();await page.mouse.move(canvas.x+canvas.width*.6,canvas.y+canvas.height*.6,{steps:10});await page.mouse.up();await page.locator('#savePhotoEdit').click();
- await page.locator('#saveItem').click();await page.locator('#savedItems .saved-item').first().waitFor();
+ // Several independently described photo groups share one set of ratings.
+ await page.locator('#addSubitem').click();await page.locator('#photoFiles').setInputFiles([fixture,fixture]);await page.locator('#photoGrid .photo-card').nth(1).waitFor();
+ await page.waitForFunction(()=>!document.querySelector('#addSubitem').disabled);await saved(page);
+ await page.locator('#observationText').fill('SECOND SUBITEM browser condition');await page.locator('#recommendationText').fill('Second subitem recommendation');
+ await page.locator('.subitem-select').nth(0).click();assert((await page.locator('#observationText').inputValue()).includes('FIRST'));
+ await page.locator('.subitem-select').nth(1).click();assert.equal(await page.locator('#observationText').inputValue(),'SECOND SUBITEM browser condition');
+ await page.locator('#saveItem').click();await page.locator('#savedItems .saved-item').first().waitFor();await saved(page);assert.equal(await page.locator('#savedItems .saved-subitem').count(),2);
  await seedItem(page,'SECOND browser condition',fixture);await page.locator('#saveItem').click();await saved(page);
  await page.locator('#reportSections summary').click();await page.locator('#savedItems').scrollIntoViewIfNeeded();
  const handles=page.locator('#savedItems .item-drag-handle');assert.equal(await handles.count(),2);

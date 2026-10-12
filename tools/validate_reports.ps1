@@ -1,6 +1,7 @@
 param([string[]]$Paths = @(
     'workbench/resources/report_template.docx',
     '.build/qa/generated-sample.docx',
+    '.build/qa/subitems-merged.docx',
     '.build/qa/legacy-template-regression.docx',
     '.build/qa/photo-names.docx',
     '.build/qa/edited-photo.docx'

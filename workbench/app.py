@@ -13,6 +13,7 @@ from report_engine import generate_report
 from version import __version__
 from preview import PreviewManager,word_capability
 from ratings import DEFAULT_RATING_OPTIONS
+from inspection_items import blank_item, normalize_project, all_photos
 
 pillow_heif.register_heif_opener()
 Image.MAX_IMAGE_PIXELS = 100_000_000
@@ -144,7 +145,7 @@ class Store:
         project=json.loads(path.read_text(encoding='utf-8'))
         project.setdefault('sections',dict.fromkeys(SECTION_FIELDS,''))
         project.setdefault('cost_rows',[])
-        return project
+        return normalize_project(project)
 
     def list(self):
         result=[]
@@ -155,7 +156,7 @@ class Store:
 
     def new(self):
         p={'id':secrets.token_hex(16),'revision':0,'updated':datetime.now().isoformat(timespec='seconds'),
-           'metadata':dict.fromkeys(METADATA,''),'sections':dict.fromkeys(SECTION_FIELDS,''),'cost_rows':[],'items':[],'editor':{'photos':[],**dict.fromkeys(RATINGS+['observation','recommendation'],'')},'editor_id':None}
+           'metadata':dict.fromkeys(METADATA,''),'sections':dict.fromkeys(SECTION_FIELDS,''),'cost_rows':[],'items':[],'editor':blank_item(),'editor_id':None,'schema_version':2}
         p['metadata'].update({'client':'Town of Port Hedland','revision':'A','purpose':'Information','report_date':date.today().isoformat()})
         atomic_json(self.path_for_project(p['id']),p);return p
 
@@ -168,6 +169,7 @@ class Store:
             value=sections.setdefault(key,'')
             if not isinstance(value,str) or len(value)>60000:raise ValueError('每个报告章节最多 60000 字符')
         if not isinstance(p.get('metadata'),dict) or not isinstance(p.get('items'),list) or len(p['items'])>1000:raise ValueError('草稿格式不正确')
+        normalize_project(p)
         for key in METADATA:
             value=p['metadata'].get(key,'')
             if not isinstance(value,str) or len(value)>500:raise ValueError('报告信息过长')
@@ -175,23 +177,37 @@ class Store:
             if p['metadata'].get(key):identifier(p['metadata'][key])
         date.fromisoformat(p['metadata']['report_date'])
         itemids=set()
-        for item in [*p['items'],p.get('editor',{})]:
-            for key in RATINGS+['observation','recommendation']:
+        for index,item in enumerate([*p['items'],p.get('editor',{})]):
+            saved=index<len(p['items'])
+            for key in RATINGS:
                 if not isinstance(item.get(key,''),str) or len(item.get(key,''))>15000:raise ValueError('检查项文字过长')
-            photos=item.get('photos',[])
-            if not isinstance(photos,list) or len(photos)>100:raise ValueError('每个检查项最多 100 张照片')
-            for photo in photos:
-                pid=identifier(photo['id'])
-                if pid not in self.catalog:raise ValueError('照片不存在，请重新导入')
-                photo['name']=self.catalog[pid]['name']
-                caption=photo.get('caption','')
-                if not isinstance(caption,str) or len(caption)>200:raise ValueError('照片名称最多 200 字符')
-                photo['caption']=caption.strip()
-            if item in p['items']:
+            groups=item.get('subitems')
+            if not isinstance(groups,list) or not 1<=len(groups)<=100:raise ValueError('每个检查项需要 1 至 100 个子项')
+            groupids=set();photo_count=0
+            for group in groups:
+                if not isinstance(group,dict):raise ValueError('子项格式不正确')
+                gid=identifier(group.get('id'))
+                if gid in groupids:raise ValueError('子项编号重复')
+                groupids.add(gid)
+                for key in ['observation','recommendation']:
+                    if not isinstance(group.get(key,''),str) or len(group.get(key,''))>15000:raise ValueError('检查项文字过长')
+                photos=group.get('photos',[])
+                if not isinstance(photos,list):raise ValueError('子项照片格式不正确')
+                photo_count+=len(photos)
+                if photo_count>100:raise ValueError('每个检查项最多 100 张照片')
+                for photo in photos:
+                    pid=identifier(photo['id'])
+                    if pid not in self.catalog:raise ValueError('照片不存在，请重新导入')
+                    photo['name']=self.catalog[pid]['name']
+                    caption=photo.get('caption','')
+                    if not isinstance(caption,str) or len(caption)>200:raise ValueError('照片名称最多 200 字符')
+                    photo['caption']=caption.strip()
+                if saved and (not photos or not group.get('observation','').strip()):raise ValueError('每个子项需要照片和 Observation')
+            if saved:
                 iid=identifier(item['id'])
                 if iid in itemids:raise ValueError('检查项编号重复')
                 itemids.add(iid)
-                if not photos or not item.get('observation','').strip() or any(not item.get(k,'').strip() for k in RATINGS):raise ValueError('检查项缺少照片、Observation 或评级')
+                if any(not item.get(k,'').strip() for k in RATINGS):raise ValueError('检查项缺少照片、Observation 或评级')
 
     def save(self,p):
         with self.lock:
@@ -317,7 +333,7 @@ class Store:
     def backup_snapshot(self,p):
         with self.lock:
             p=deepcopy(p);self.validate(p)
-            photoids={ph['id'] for item in [*p['items'],p['editor']] for ph in item['photos']}
+            photoids={ph['id'] for item in [*p['items'],p['editor']] for ph in all_photos(item)}
             result=BytesIO()
             with zipfile.ZipFile(result,'w',zipfile.ZIP_DEFLATED) as z:
                 z.writestr('project.json',json.dumps(p,ensure_ascii=False))
@@ -330,7 +346,7 @@ class Store:
     def restore(self,content):
         with self.lock, zipfile.ZipFile(BytesIO(content)) as z:
             if sum(n.file_size for n in z.infolist())>2_000_000_000:raise ValueError('备份文件过大')
-            p=json.loads(z.read('project.json'));photos=json.loads(z.read('photos.json'))
+            p=normalize_project(json.loads(z.read('project.json')));photos=json.loads(z.read('photos.json'))
             mapping={identifier(i):secrets.token_hex(16) for i in photos}
             prepared=[]
             for old,new in mapping.items():
@@ -341,7 +357,7 @@ class Store:
                 if hashlib.sha256(original).hexdigest()!=ph['sha256']:raise ValueError('备份照片校验失败')
                 prepared.append((new,{**ph,'id':new},original,converted))
             for item in [*p['items'],p['editor']]:
-                for ph in item['photos']:ph['id']=mapping[ph['id']]
+                for ph in all_photos(item):ph['id']=mapping[ph['id']]
             p['id']=secrets.token_hex(16);p['revision']=0;p['updated']=datetime.now().isoformat(timespec='seconds')
             previous=self.catalog.copy()
             try:

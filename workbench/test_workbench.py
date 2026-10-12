@@ -106,15 +106,15 @@ class WorkbenchTests(unittest.TestCase):
         photo=self.store.upload(image_bytes(),'conflict.jpg');self.project['items']=[self.item([photo])]
         saved=self.store.save(self.project);local=json.loads(json.dumps(saved));remote=json.loads(json.dumps(saved))
         remote['metadata']['site']='Remote saved';self.store.save(remote)
-        local['metadata']['site']='Local unsaved';local['editor']['observation']='Pending editor text';local['items'][0]['observation']='Changed item'
+        local['metadata']['site']='Local unsaved';local['editor']['subitems'][0]['observation']='Pending editor text';local['items'][0]['subitems'][0]['observation']='Changed item'
         with self.assertRaises(RevisionConflict):self.store.save(local)
         copied=self.store.copy_project(local)
         self.assertNotEqual(copied['id'],local['id']);self.assertEqual(copied['revision'],0)
         self.assertEqual(self.store.load(local['id'])['metadata']['site'],'Remote saved')
         restored=self.store.restore(self.store.backup_snapshot(local))
-        self.assertEqual(restored['metadata']['site'],'Local unsaved');self.assertEqual(restored['editor']['observation'],'Pending editor text')
-        self.assertEqual(restored['items'][0]['observation'],'Changed item')
-        with Image.open(self.store.photo_path(restored['items'][0]['photos'][0]['id'])) as image:self.assertEqual(image.size,(800,600))
+        self.assertEqual(restored['metadata']['site'],'Local unsaved');self.assertEqual(restored['editor']['subitems'][0]['observation'],'Pending editor text')
+        self.assertEqual(restored['items'][0]['subitems'][0]['observation'],'Changed item')
+        with Image.open(self.store.photo_path(restored['items'][0]['subitems'][0]['photos'][0]['id'])) as image:self.assertEqual(image.size,(800,600))
 
     def test_preview_snapshot_does_not_block_save(self):
         from preview import PreviewManager
@@ -171,10 +171,67 @@ class WorkbenchTests(unittest.TestCase):
             else:library.assert_not_called()
 
     def item(self,photos):
-        return {'id':secrets.token_hex(16),'photos':photos,'element':'Columns','condition_rating':'5. Major deterioration',
+        return {'id':secrets.token_hex(16),'element':'Columns','condition_rating':'5. Major deterioration',
                 'likelihood':'Likely','severity':'Significant','priority':'Critical',
+                'subitems':[{'id':secrets.token_hex(16),'photos':photos,
                 'observation':'Minor corrosion at the lower section. Manual edit: C1 & C2 <test>.',
-                'recommendation':'Clean, wire brush and repaint.'}
+                'recommendation':'Clean, wire brush and repaint.'}]}
+
+    def test_subitems_share_ratings_and_merge_only_their_own_photos(self):
+        photos=[self.store.upload(image_bytes(),f'group-{i}.jpg') for i in range(4)]
+        item=self.item([photos[0]])
+        item['subitems'][0].update(observation='Overview of the columns.',recommendation='')
+        item['subitems'] += [
+            {'id':secrets.token_hex(16),'photos':photos[1:3],'observation':'Corrosion at Column 1.','recommendation':'Clean and repaint Column 1.'},
+            {'id':secrets.token_hex(16),'photos':photos[3:],'observation':'Column 2 is in good condition.','recommendation':''}]
+        self.project['items']=[item]
+        self.project['metadata'].update(site='Subitem merge QA',report_number='QA-SUBITEM',project_number='QA')
+        saved=self.store.save(self.project)
+        backup=self.store.restore(self.store.backup(saved['id']))
+        self.assertEqual([len(g['photos']) for g in backup['items'][0]['subitems']],[1,2,1])
+        self.assertEqual([g['observation'] for g in backup['items'][0]['subitems']],[g['observation'] for g in item['subitems']])
+        self.assertTrue(all(g['photos'][0]['id']!=old['photos'][0]['id'] for g,old in zip(backup['items'][0]['subitems'],item['subitems'])))
+        exported=self.store.export(saved['id'])
+        report=self.store.path/'exports'/(exported['id']+'.docx')
+        with zipfile.ZipFile(report) as package:
+            doc=E.fromstring(package.read('word/document.xml'))
+            table=doc.xpath('.//w:tbl[w:tblPr/w:tblCaption/@w:val="InspectionItems"]',namespaces=NS)[0]
+            rows=table.findall('w:tr',NS);self.assertEqual(len(rows),9)
+            self.assertEqual([''.join(row.findall('w:tc',NS)[0].itertext()) for row in rows[5:]],['1.1','1.2','1.3','1.4'])
+            merges=[row.findall('w:tc',NS)[2].find('w:tcPr/w:vMerge',NS) for row in rows[5:]]
+            self.assertEqual([node.get(q('val')) if node is not None else None for node in merges],[None,'restart','continue',None])
+            text=''.join(table.xpath('.//w:t/text()',namespaces=NS))
+            for group in item['subitems']:self.assertEqual(text.count(group['observation']),1)
+            self.assertEqual(text.count('CONDITION RATING'),1)
+            self.assertEqual(len([n for n in package.namelist() if n.startswith('word/media/inspection-')]),4)
+        (QA/'subitems-merged.docx').write_bytes(report.read_bytes())
+
+    def test_legacy_item_migration_is_read_only_and_preserves_content(self):
+        photo=self.store.upload(image_bytes(),'legacy.jpg');item=self.item([photo]);group=item.pop('subitems')[0]
+        item.update({k:v for k,v in group.items() if k!='id'})
+        self.project['items']=[item];self.project['editor']={'photos':[photo],'observation':'Pending old editor','recommendation':'','element':''}
+        self.project.pop('schema_version')
+        path=self.store.path_for_project(self.project['id']);atomic_json(path,self.project);before=path.read_bytes()
+        migrated=self.store.load(self.project['id'])
+        self.assertEqual(path.read_bytes(),before)
+        self.assertEqual(migrated['schema_version'],2)
+        self.assertEqual(migrated['items'][0]['subitems'][0]['observation'],group['observation'])
+        self.assertEqual(migrated['editor']['subitems'][0]['observation'],'Pending old editor')
+        self.assertNotIn('photos',migrated['items'][0])
+        restored=self.store.restore(self.store.backup_snapshot(self.project))
+        self.assertEqual(restored['editor']['subitems'][0]['observation'],'Pending old editor')
+
+    def test_subitem_validation_allows_incomplete_editor_but_not_saved_item(self):
+        photo=self.store.upload(image_bytes(),'validation.jpg');self.project['items']=[self.item([photo])]
+        self.project['editor']['subitems'].append({'id':secrets.token_hex(16),'photos':[photo],'observation':'','recommendation':''})
+        saved=self.store.save(self.project)
+        self.assertEqual(len(self.store.restore(self.store.backup(saved['id']))['editor']['subitems']),2)
+        for group in [
+            {'id':secrets.token_hex(16),'photos':[],'observation':'Missing photo','recommendation':''},
+            {'id':secrets.token_hex(16),'photos':[photo],'observation':'','recommendation':''},
+            {**saved['items'][0]['subitems'][0]}]:
+            edited=json.loads(json.dumps(saved));edited['items'][0]['subitems'].append(group)
+            with self.assertRaises(ValueError):self.store.save(edited)
 
     def test_common_library_matches_excel_and_keeps_stable_ids(self):
         lib=read_library_xlsx((RESOURCES/'word_library.xlsx').read_bytes())
@@ -188,7 +245,7 @@ class WorkbenchTests(unittest.TestCase):
 
     def test_old_preset_upgrades_without_changing_saved_item_text(self):
         photo=self.store.upload(image_bytes(),'saved.jpg')
-        item=self.item([photo]);item['observation']='Unique wording retained in an existing report.'
+        item=self.item([photo]);item['subitems'][0]['observation']='Unique wording retained in an existing report.'
         item['observation_source']='OBS-0622';self.project['items']=[item]
         self.store.save(self.project)
         legacy={'observation':[{'id':'OBS-0622','text':'One-off historical wording','elements':'Columns','frequency':1}],
@@ -268,15 +325,15 @@ class WorkbenchTests(unittest.TestCase):
         self.assertTrue((self.store.path/'backups'/(saved['id']+'.previous.json')).exists())
         restored=self.store.restore(self.store.backup(saved['id']))
         self.assertNotEqual(restored['id'],saved['id'])
-        self.assertEqual(restored['items'][0]['observation'],saved['items'][0]['observation'])
-        self.assertNotEqual(restored['items'][0]['photos'][0]['id'],ph['id'])
+        self.assertEqual(restored['items'][0]['subitems'][0]['observation'],saved['items'][0]['subitems'][0]['observation'])
+        self.assertNotEqual(restored['items'][0]['subitems'][0]['photos'][0]['id'],ph['id'])
 
     def test_reports_template_fidelity_multiphoto_long_text(self):
         photos=[self.store.upload(image_bytes(size),'photo'+str(i)+'.jpg') for i,size in enumerate([(1200,900),(900,1200),(1200,900),(900,1200)],1)]
         self.project['metadata'].update({'site':'Prototype Layout Test','report_number':'TEST-SIR-001','project_number':'TEST','report_date':'2026-10-10','prepared_by':'Test Author','reviewed_by':'Test Reviewer'})
         self.project['items']=[self.item(photos),self.item([photos[0]])]
         self.project['items'][1]['priority']='Low'
-        self.project['items'][1]['observation']='Long observation for pagination verification. '+('The inspected area has a separately recorded local condition. '*55)
+        self.project['items'][1]['subitems'][0]['observation']='Long observation for pagination verification. '+('The inspected area has a separately recorded local condition. '*55)
         self.store.save(self.project);result=self.store.export(self.project['id'])
         report=self.store.path/'exports'/(result['id']+'.docx');sample=QA/'generated-sample.docx';sample.write_bytes(report.read_bytes())
         with zipfile.ZipFile(report) as z,zipfile.ZipFile(RESOURCES/'report_template.docx') as template:
@@ -298,7 +355,7 @@ class WorkbenchTests(unittest.TestCase):
             self.assertEqual(len(doc.find('w:body',NS)[1].xpath('.//w:drawing',namespaces=NS)),len(cover_source.find('w:body',NS)[1].xpath('.//w:drawing',namespaces=NS)))
             self.assertEqual([E.tostring(n) for n in doc.xpath('.//w:sectPr',namespaces=NS)],[E.tostring(n) for n in before.xpath('.//w:sectPr',namespaces=NS)])
             text=''.join(doc.xpath('.//w:t/text()',namespaces=NS))
-            self.assertIn(self.project['items'][0]['observation'],text);self.assertIn('Prototype Layout Test',text)
+            self.assertIn(self.project['items'][0]['subitems'][0]['observation'],text);self.assertIn('Prototype Layout Test',text)
             for old in ['1/19 Dempster Street','Salman Agherdien','15 July 2025','The most significant corrosion','{{']:
                 self.assertNotIn(old,text)
             self.assertEqual(len([n for n in z.namelist() if n.startswith('word/media/inspection-')]),5)
@@ -378,7 +435,7 @@ class WorkbenchTests(unittest.TestCase):
         self.assertEqual(len(dates),2)
         for node in dates:self.assertRegex(node.text,r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$')
         self.assertIsNone(core.find('{http://schemas.openxmlformats.org/package/2006/metadata/core-properties}lastPrinted'))
-        self.assertIn(self.project['items'][0]['observation'],''.join(doc.xpath('.//w:t/text()',namespaces=NS)))
+        self.assertIn(self.project['items'][0]['subitems'][0]['observation'],''.join(doc.xpath('.//w:t/text()',namespaces=NS)))
         pr=E.Element(q('pPr'));child(pr,'keepNext');child(pr,'keepNext')
         self.assertEqual(len(pr.findall(q('keepNext'))),1)
 
@@ -390,9 +447,9 @@ class WorkbenchTests(unittest.TestCase):
         self.project['items'][0]['severity']='Minor. Review after repainting.'
         self.project['items'][0]['priority']='High. Repair within a month.'
         saved=self.store.save(self.project)
-        self.assertEqual(saved['items'][0]['photos'][0]['caption'],first['caption'])
+        self.assertEqual(saved['items'][0]['subitems'][0]['photos'][0]['caption'],first['caption'])
         restored=self.store.restore(self.store.backup(saved['id']))
-        self.assertEqual([p['caption'] for p in restored['items'][0]['photos']],[first['caption'],''])
+        self.assertEqual([p['caption'] for p in restored['items'][0]['subitems'][0]['photos']],[first['caption'],''])
         self.assertEqual(restored['items'][0]['severity'],self.project['items'][0]['severity'])
         result=self.store.export(saved['id']);report=self.store.path/'exports'/(result['id']+'.docx')
         (QA/'photo-names.docx').write_bytes(report.read_bytes())
@@ -402,7 +459,7 @@ class WorkbenchTests(unittest.TestCase):
         self.assertEqual(text.count(first['caption']),1)
         self.assertNotIn('other.jpg',text)
         for invalid in [None,3,'x'*201]:
-            edited=json.loads(json.dumps(saved));edited['items'][0]['photos'][0]['caption']=invalid
+            edited=json.loads(json.dumps(saved));edited['items'][0]['subitems'][0]['photos'][0]['caption']=invalid
             with self.assertRaises(ValueError):self.store.save(edited)
 
     def test_crop_annotation_preserves_source_and_survives_backup(self):
@@ -425,7 +482,7 @@ class WorkbenchTests(unittest.TestCase):
         with zipfile.ZipFile(report_file) as package:
             self.assertEqual(package.read('word/media/inspection-1-1.jpg'),self.store.photo_path(edited['id']).read_bytes())
         restored=self.store.restore(self.store.backup(self.project['id']))
-        restored_photo=restored['items'][0]['photos'][0]
+        restored_photo=restored['items'][0]['subitems'][0]['photos'][0]
         self.assertEqual(restored_photo['caption'],'Column A')
         self.assertEqual(self.store.photo_path(restored_photo['id']).read_bytes(),self.store.photo_path(edited['id']).read_bytes())
         count=len(self.store.catalog)

@@ -3,6 +3,7 @@ import argparse
 from io import BytesIO
 import json
 import os
+import secrets
 from pathlib import Path
 import shutil
 import subprocess
@@ -75,6 +76,18 @@ def exercise(executable, folder, fixtures, qa, edition):
     with Image.open(BytesIO(request('/photos/'+edited['id']+'.jpg',raw=True))) as image:assert image.size==(500,600)
     item={'id':'a'*32,'photos':photos,'element':'Columns','condition_rating':'5. Major deterioration','likelihood':'Likely','severity':'Significant','priority':'Critical','observation':'Minor corrosion. Manually edited in the standalone EXE test.','recommendation':'Clean, wire brush and repaint.'}
     p['items']=[item];p=request('/api/save',p)
+    # Older flat items migrate before adding independently described photo groups.
+    migrated=p['items'][0]['subitems'][0]
+    assert migrated['observation']==item['observation'] and len(migrated['photos'])==2
+    migrated['photos']=photos[:1]
+    p['items'][0]['subitems'] += [
+        {'id':secrets.token_hex(16),'photos':photos[::-1],
+         'observation':'Independent second subitem with two photographs.','recommendation':''},
+        {'id':secrets.token_hex(16),'photos':photos[1:],
+         'observation':'Independent third subitem.','recommendation':'Review the third group only.'},
+    ]
+    p=request('/api/save',p)
+    assert [len(g['photos']) for g in p['items'][0]['subitems']]==[1,2,1]
     export=request('/api/generate',{'id':p['id']})
     report=request('/api/download?id='+export['id'],raw=True)
     with zipfile.ZipFile(BytesIO(report)) as z:
@@ -84,23 +97,31 @@ def exercise(executable, folder, fixtures, qa, edition):
         assert 'Edited portable photograph' in document
         assert z.read('word/media/inspection-1-1.jpg')==(folder/'photos'/(edited['id']+'.jpg')).read_bytes()
         assert '{{' not in document and '1/19 Dempster' not in document
-        assert len([n for n in z.namelist() if n.startswith('word/media/inspection-')])==2
+        assert len([n for n in z.namelist() if n.startswith('word/media/inspection-')])==4
         from lxml import etree
         tree=etree.fromstring(z.read('word/document.xml'))
         ns={'w':'http://schemas.openxmlformats.org/wordprocessingml/2006/main','wp':'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing'}
         tables=[t for t in tree.findall('.//w:tbl',ns) if 'CONDITION RATING' in ''.join(t.itertext())]
         assert tables and all(t.find('w:tblPr/w:tblW',ns).get('{'+ns['w']+'}w')=='9771' for t in tables)
         assert [c.get('{'+ns['w']+'}w') for c in tables[0].findall('w:tblGrid/w:gridCol',ns)]==['703','3259','5809']
+        rows=tables[0].findall('w:tr',ns)[5:]
+        assert [''.join(r.find('w:tc',ns).itertext()) for r in rows]==['1.1','1.2','1.3','1.4']
+        merges=[r.findall('w:tc',ns)[2].find('w:tcPr/w:vMerge',ns) for r in rows]
+        assert [m.get('{'+ns['w']+'}val') if m is not None else None for m in merges]==[None,'restart','continue',None]
+        for group in p['items'][0]['subitems']:assert document.count(group['observation'])==1
+        assert document.count('Review the third group only.')==1
         assert all(abs(int(e.get('cx'))-3259*635)<=1 for t in tables for e in t.findall('.//wp:extent',ns))
         with zipfile.ZipFile(root/'workbench/resources/report_template.docx') as template:
             assert z.read('word/styles.xml')==template.read('word/styles.xml')
     (qa/'frozen-generated.docx').write_bytes(report)
     backup=request('/api/backup?id='+p['id'],raw=True)
-    restored=request('/api/restore',backup);assert restored['id']!=p['id'] and restored['items'][0]['observation']==item['observation']
-    assert restored['items'][0]['photos'][0]['id']!=photos[0]['id']
+    restored=request('/api/restore',backup);assert restored['id']!=p['id'] and restored['items'][0]['subitems'][0]['observation']==item['observation']
+    assert restored['items'][0]['subitems'][0]['photos'][0]['id']!=photos[0]['id']
+    assert [len(g['photos']) for g in restored['items'][0]['subitems']]==[1,2,1]
+    assert [g['observation'] for g in restored['items'][0]['subitems']]==[g['observation'] for g in p['items'][0]['subitems']]
     library=request('/api/library',(root/'workbench/resources/word_library.xlsx').read_bytes())['library']
     assert len(library['observation'])==90 and len(library['recommendation'])==44
-    assert request('/api/project?id='+p['id'])['items'][0]['observation']==item['observation']
+    assert request('/api/project?id='+p['id'])['items'][0]['subitems'][0]['observation']==item['observation']
     before=len(request('/api/bootstrap')['projects'])
     for path,data,h in [('/api/bootstrap',None,{'Cookie':''}),('/api/new',b'', {'Origin':'https://example.invalid'}),('/api/new',b'', {'X-Workbench':''})]:
         try:request(path,data,h);raise AssertionError('Expected rejection')
@@ -127,7 +148,8 @@ def exercise(executable, folder, fixtures, qa, edition):
     return {'status': 'passed', 'version': VERSION, 'edition':edition, 'report_bytes': len(report),
             'checks': ['ZIP extraction', 'standalone startup and web assets', 'portable data folder',
                        'HEIC/JPG import', 'rotation/crop/annotation and originals', 'save/reopen', 'DOCX export',
-                       'backup/restore', 'Excel library', 'personnel snapshot and manual clearing', 'loopback authentication', 'conflict/copy/recovery ZIP', 'no Word environment with DOCX export', 'repeated startup', 'shutdown']}
+                       'legacy item migration', 'subitems with shared ratings and independent wording', 'continuous photo numbering and description cell merging',
+                       'all-subitem backup/restore', 'Excel library', 'personnel snapshot and manual clearing', 'loopback authentication', 'conflict/copy/recovery ZIP', 'no Word environment with DOCX export', 'repeated startup', 'shutdown']}
 
 
 def verify_readonly_fallback(executable,directory,environment,edition):

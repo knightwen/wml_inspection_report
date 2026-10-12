@@ -27,6 +27,9 @@ class EnglishAssetsTest(unittest.TestCase):
             self.assertNotRegex(page, r'[\u4e00-\u9fff]')
             self.assertNotIn('languageSelect', page)
             self.assertIn('lang="en-AU"', page)
+            self.assertIn('Photo and wording subitems', page)
+            self.assertIn('Add subitem', page)
+            self.assertIn('Photos in this subitem share the same wording', page)
             self.assertIn('englishOnly: true', (web / 'interface.js').read_text())
             self.assertEqual(json.loads((resources / 'ui_config.json').read_text())['edition'], 'english')
             people = json.loads((resources / 'personnel.json').read_text())['people']

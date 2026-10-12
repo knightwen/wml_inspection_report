@@ -1,5 +1,6 @@
 """Generate reports by cloning the retained Word template's OOXML components."""
 from costs import amount, validate_rows
+from inspection_items import item_subitems
 from decimal import Decimal
 from copy import deepcopy
 from datetime import date, datetime, timezone
@@ -373,11 +374,16 @@ def generate_report(template, project, photo_path, target):
         if color is None:color=child(priority_rpr,'color')
         color.set(q('val'),'FFFFFF' if item['priority'] in ['Critical','Urgent'] else '000000')
         for attr in ['themeColor','themeTint','themeShade']:color.attrib.pop(q(attr),None)
-        for pi,photo in enumerate(item['photos'],1):
+        photo_rows=[(group,gi,photo) for group in item_subitems(item) for gi,photo in enumerate(group['photos'])]
+        for pi,(group,gi,photo) in enumerate(photo_rows,1):
             row=deepcopy(base);cells=row.findall('w:tc',NS);set_text(cells[0],f'{itemindex}.{pi}')
             for cell in cells[1:]:
                 for n in list(cell):
                     if n.tag!=q('tcPr'):cell.remove(n)
+            description_pr=cells[2].find('w:tcPr',NS)
+            for merge in description_pr.findall('w:vMerge',NS):description_pr.remove(merge)
+            if len(group['photos'])>1:child(description_pr,'vMerge',val='restart' if gi==0 else 'continue')
+            child(description_pr,'vAlign',val='top')
             path=photo_path(photo['id'])
             with Image.open(path) as image:size=image.size
             while 'rId'+str(nextid) in used_ids:nextid+=1
@@ -390,13 +396,13 @@ def generate_report(template, project, photo_path, target):
                 child(pr,'jc',val='center');child(pr,'spacing',before='60',after='0')
                 rpr=E.Element(q('rPr'));caption.find('w:r',NS).insert(0,rpr);child(rpr,'sz',val='18')
                 cells[1].append(caption)
-            if pi==1:
-                cells[2].append(content_paragraph('OBSERVATION',item['observation'],description_properties))
-                if item['recommendation'].strip():
+            if gi==0:
+                cells[2].append(content_paragraph('OBSERVATION',group['observation'],description_properties))
+                if group['recommendation'].strip():
                     spacer=paragraph()
                     if description_properties is not None:spacer.insert(0,deepcopy(description_properties))
                     cells[2].append(spacer)
-                    cells[2].append(content_paragraph('RECOMMENDATION',item['recommendation'],description_properties))
+                    cells[2].append(content_paragraph('RECOMMENDATION',group['recommendation'],description_properties))
             else:
                 cells[2].append(paragraph())
             # Allow exceptionally long observations to flow over pages, while normal
@@ -404,7 +410,8 @@ def generate_report(template, project, photo_path, target):
             pr=row.find('w:trPr',NS)
             if pr is None:pr=E.Element(q('trPr'));row.insert(0,pr)
             for n in pr.findall('w:trHeight',NS):pr.remove(n)
-            if len(item['observation'])+len(item['recommendation'])<2200:child(pr,'cantSplit')
+            for n in pr.findall('w:cantSplit',NS):pr.remove(n)
+            if len(group['observation'])+len(group['recommendation'])<2200:child(pr,'cantSplit')
             table.append(row)
         body.insert(at,table);at+=1
         gap=paragraph();body.insert(at,gap);at+=1
