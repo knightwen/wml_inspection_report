@@ -22,6 +22,35 @@ class WorkbenchTests(unittest.TestCase):
 
     def tearDown(self):self.store.previews.close();self.tmp.cleanup()
 
+    def test_cover_combines_project_and_report_numbers_without_duplicate_prefix(self):
+        self.project['items']=[self.item([self.store.upload(image_bytes(),'cover.jpg')])]
+        self.project['metadata'].update(site='Cover QA',project_number='12477',document_name='Custom document name')
+        with zipfile.ZipFile(RESOURCES/'report_template.docx') as z:
+            parts={name:z.read(name) for name in z.namelist()}
+        original=E.fromstring(parts['word/document.xml']).find('w:body',NS)[1]
+        # Exercise both the current template and the report-only marker in older templates.
+        for marker in ['{{report_reference}}','{{report_number}}']:
+            doc=E.fromstring(parts['word/document.xml'])
+            doc.find('w:body',NS)[1].find('.//w:t',NS).text=marker
+            legacy_template=Path(self.tmp.name)/'cover-template.docx'
+            with zipfile.ZipFile(legacy_template,'w') as z:
+                for name,data in parts.items():z.writestr(name,xml(doc) if name=='word/document.xml' else data)
+            for number in ['SIR-004','12477-SIR-004','  SIR-004  ']:
+                with self.subTest(marker=marker,number=number):
+                    self.project['metadata']['report_number']=number
+                    target=Path(self.tmp.name)/'cover.docx'
+                    generate_report(legacy_template,self.project,self.store.photo_path,target)
+                    with zipfile.ZipFile(target) as z:
+                        body=E.fromstring(z.read('word/document.xml')).find('w:body',NS)
+                        cover=body[1]
+                        self.assertEqual(''.join(cover.xpath('.//w:t/text()',namespaces=NS)),'12477-SIR-004')
+                        self.assertEqual(E.tostring(cover.find('w:pPr',NS)),E.tostring(original.find('w:pPr',NS)))
+                        self.assertEqual(E.tostring(cover.find('w:r/w:rPr',NS)),E.tostring(original.find('w:r/w:rPr',NS)))
+                        self.assertIn('12477',body[5].xpath('.//w:t/text()',namespaces=NS))
+                        self.assertIn('Custom document name',body[5].xpath('.//w:t/text()',namespaces=NS))
+                        self.assertEqual(z.read('word/styles.xml'),parts['word/styles.xml'])
+                    self.assertEqual(self.project['metadata']['report_number'],number)
+
     def test_cost_rows_decimal_export_and_backup(self):
         from costs import amount
         rows=[{'description':'Repair steel','quantity':'3','unit':'each','rate':'0.335','priority':'High'},{'description':'Clean','quantity':'2.5','unit':'m2','rate':'100','priority':'Low'}]

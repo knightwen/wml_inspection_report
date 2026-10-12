@@ -1,6 +1,8 @@
 # WML Inspection Report Workbench
 
-本地检查报告工作台，当前版本 **0.1.5**。支持共用评级的检查项、带多张照片和独立描述的子项、可编辑的 Observation / Recommendation，并按 Word 模板生成 DOCX 报告。
+本地检查报告工作台，当前版本 **0.1.6**。支持共用评级的检查项、带多张照片和独立描述的子项、可编辑的 Observation / Recommendation，并按 Word 模板生成 DOCX 报告。
+
+封面编号使用“项目编号-报告编号”，例如 `12477` + `SIR-004` → `12477-SIR-004`。报告编号已含项目编号前缀时不会重复添加。中英文版使用相同规则。
 
 提供中英文切换版和独立纯英文版，同时发布为两个 Windows 便携 ZIP。纯英文版固定英文界面，配套英文示例人员、措辞库 Excel 说明和使用说明；中文版继续保留，两版均支持子项。
 
@@ -72,12 +74,12 @@ python -m venv .venv
 
 每个命令分别完成该版本的 EXE 构建、ZIP 打包和解压后运行验证。输出：
 
-- `outputs/workbench_v0.1.4/InspectionWorkbench.exe`
-- `outputs/InspectionWorkbench_v0.1.4_Windows_x64.zip`
-- `outputs/InspectionWorkbench_v0.1.4_Windows_x64.zip.sha256`
-- `outputs/workbench_english_v0.1.4/InspectionWorkbenchEnglish.exe`
-- `outputs/InspectionWorkbenchEnglish_v0.1.4_Windows_x64.zip`
-- `outputs/InspectionWorkbenchEnglish_v0.1.4_Windows_x64.zip.sha256`
+- `outputs/workbench_v0.1.6/InspectionWorkbench.exe`
+- `outputs/InspectionWorkbench_v0.1.6_Windows_x64.zip`
+- `outputs/InspectionWorkbench_v0.1.6_Windows_x64.zip.sha256`
+- `outputs/workbench_english_v0.1.6/InspectionWorkbenchEnglish.exe`
+- `outputs/InspectionWorkbenchEnglish_v0.1.6_Windows_x64.zip`
+- `outputs/InspectionWorkbenchEnglish_v0.1.6_Windows_x64.zip.sha256`
 
 ZIP 包含程序、使用说明、许可证、应用源码及 HEIC 组件对应源码，不包含个人草稿和现场照片。程序内含界面、Word 模板、文字库和 HEIC 解码器。首次打包需要联网下载第三方源码，后续复用 `.build/source-cache`，每次校验 SHA-256。运行程序无需联网。
 
@@ -96,11 +98,11 @@ ZIP 包含程序、使用说明、许可证、应用源码及 HEIC 组件对应�
 首次发布当前版本（先将本次修改提交并推送到远程分支）：
 
 ```powershell
-git tag v0.1.4
-git push origin v0.1.4
+git tag v0.1.6
+git push origin v0.1.6
 ```
 
-后续发布先修改 `workbench/version.py` 中的版本号，并更新 README 的版本及输出示例，并添加对应 `docs/RELEASE_NOTES_v版本号.md`，再提交、推送对应标签，例如 `v0.1.5`。无需上传 `outputs/` 到 Git，也无需额外配置发布 Token；发布 job 使用 GitHub 提供的 `GITHUB_TOKEN`，仅该 job 请求 `contents: write`。仓库须允许 GitHub Actions 运行。
+后续发布先修改 `workbench/version.py` 中的版本号，并更新 README 的版本及输出示例，并添加对应 `docs/RELEASE_NOTES_v版本号.md`，再提交、推送对应标签，例如 `v0.1.6`。无需上传 `outputs/` 到 Git，也无需额外配置发布 Token；发布 job 使用 GitHub 提供的 `GITHUB_TOKEN`，仅该 job 请求 `contents: write`。仓库须允许 GitHub Actions 运行。
 
 
 ## 验证
@@ -113,7 +115,7 @@ node tools/test_draft_state.cjs
 powershell -File tools/validate_reports.ps1
 ```
 
-23 项应用测试覆盖人员库快照与手动姓名清理、草稿冲突副本及未保存 ZIP、后台预览快照与并行保存、无 Word 和转换失败、超时清理与进程身份检查，以及常用库、HEIC、原图、照片编辑、备份和多照片 Word 模板。若本地存在历史原报告，测试会额外对比原模板；仅克隆此仓库时验证已保存模板和固定版式尺寸。
+27 项应用测试覆盖人员库快照与手动姓名清理、草稿冲突副本及未保存 ZIP、后台预览快照与并行保存、无 Word 和转换失败、超时清理与进程身份检查，以及常用库、HEIC、原图、照片编辑、备份和多照片 Word 模板。若本地存在历史原报告，测试会额外对比原模板；仅克隆此仓库时验证已保存模板和固定版式尺寸。
 
 自动化浏览器回归需要开发用 Node.js 和 Playwright；最终用户不需要这些依赖。本机有 Edge 时执行：
 

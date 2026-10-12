@@ -1,4 +1,8 @@
-# Inspection Workbench 0.1.5 — English edition
+# Inspection Workbench 0.1.6 — English edition
+
+The report cover combines the project number and report number, for example
+`12477` and `SIR-004` produce `12477-SIR-004`. A report number that already
+starts with the project number is kept without adding the prefix again.
 
 Windows 10/11, 64-bit. Extract the complete ZIP into a folder, then double-click
 InspectionWorkbenchEnglish.exe. The program opens your browser and runs locally.

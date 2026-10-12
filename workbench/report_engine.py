@@ -91,7 +91,7 @@ def prepare_template(source, target):
     doc = E.fromstring(parts['word/document.xml'])
     body = doc.find('w:body', NS)
     original = list(body)
-    for index, field in [(0, 'client'), (1, 'report_number'), (2, 'cover_title'), (3, 'report_date_long')]:
+    for index, field in [(0, 'client'), (1, 'report_reference'), (2, 'cover_title'), (3, 'report_date_long')]:
         set_text(original[index], '{{' + field + '}}', preserve_art=True)
     history = original[5].findall('w:tr', NS)
     for cell, key in zip(history[2].findall('w:tc', NS), ['revision','prepared_by','reviewed_by','purpose','report_date_short']):
@@ -249,6 +249,10 @@ def normalize_package(parts):
 
 def metadata_values(meta):
     values={key:str(value or '') for key,value in meta.items()}
+    project_number=values.get('project_number','').strip()
+    report_number=values.get('report_number','').strip()
+    values['report_reference']=(report_number if not project_number or report_number.startswith(project_number+'-')
+                               else project_number+'-'+report_number)
     d=date.fromisoformat(values['report_date'])
     values['report_date_long']=f'{d.day} {d.strftime("%B")} {d.year}'
     values['report_date_short']=d.strftime('%d/%m/%Y')
@@ -346,6 +350,11 @@ def generate_report(template, project, photo_path, target):
     for name,content in list(parts.items()):
         if name.startswith('word/') and name.endswith('.xml') and (name=='word/document.xml' or re.search(r'(header|footer)\d+\.xml$',name)):
             node=E.fromstring(content)
+            # Older retained templates used the report-only marker in the cover slot.
+            if name=='word/document.xml':
+                cover=node.find('w:body',NS)[1]
+                for t in cover.xpath('.//w:t',namespaces=NS):
+                    if t.text=='{{report_number}}':t.text='{{report_reference}}'
             for t in node.xpath('.//w:t',namespaces=NS):
                 if t.text:
                     t.text=re.sub(r'\{\{(\w+)\}\}',lambda m:values.get(m[1],''),t.text)

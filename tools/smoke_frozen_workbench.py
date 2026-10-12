@@ -59,7 +59,7 @@ def exercise(executable, folder, fixtures, qa, edition):
     personnel=request('/api/personnel',personnel)
     assert request('/api/personnel')==personnel
     p=request('/api/new',{})
-    p['metadata'].update(site='Frozen EXE Test',project_number='TEST',report_number='TEST-SIR-EXE',prepared_by='Test Author',reviewed_by='Test Reviewer')
+    p['metadata'].update(site='Frozen EXE Test',project_number='TEST',report_number='SIR-EXE',prepared_by='Test Author',reviewed_by='Test Reviewer')
     person=personnel['people'][0]
     p['metadata'].update(prepared_by=person['name'],prepared_by_id=person['id'],author_qualifications=person['qualifications'],author_title=person['title'])
     photos=[]
@@ -101,6 +101,7 @@ def exercise(executable, folder, fixtures, qa, edition):
         from lxml import etree
         tree=etree.fromstring(z.read('word/document.xml'))
         ns={'w':'http://schemas.openxmlformats.org/wordprocessingml/2006/main','wp':'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing'}
+        assert ''.join(tree.find('w:body',ns)[1].xpath('.//w:t/text()',namespaces=ns))=='TEST-SIR-EXE'
         tables=[t for t in tree.findall('.//w:tbl',ns) if 'CONDITION RATING' in ''.join(t.itertext())]
         assert tables and all(t.find('w:tblPr/w:tblW',ns).get('{'+ns['w']+'}w')=='9771' for t in tables)
         assert [c.get('{'+ns['w']+'}w') for c in tables[0].findall('w:tblGrid/w:gridCol',ns)]==['703','3259','5809']
@@ -147,7 +148,7 @@ def exercise(executable, folder, fixtures, qa, edition):
     request('/api/shutdown', {})
     return {'status': 'passed', 'version': VERSION, 'edition':edition, 'report_bytes': len(report),
             'checks': ['ZIP extraction', 'standalone startup and web assets', 'portable data folder',
-                       'HEIC/JPG import', 'rotation/crop/annotation and originals', 'save/reopen', 'DOCX export',
+                       'HEIC/JPG import', 'rotation/crop/annotation and originals', 'save/reopen', 'DOCX export', 'cover project/report reference',
                        'legacy item migration', 'subitems with shared ratings and independent wording', 'continuous photo numbering and description cell merging',
                        'all-subitem backup/restore', 'Excel library', 'personnel snapshot and manual clearing', 'loopback authentication', 'conflict/copy/recovery ZIP', 'no Word environment with DOCX export', 'repeated startup', 'shutdown']}
 
