@@ -37,7 +37,8 @@ async function seedItem(page,text,fixture){
  await page.locator('#photoGrid button').filter({hasText:'编辑'}).first().click();await page.locator('#photoToolCircle').click();
  const canvas=await page.locator('#photoEditCanvas').boundingBox();await page.mouse.move(canvas.x+canvas.width*.25,canvas.y+canvas.height*.25);await page.mouse.down();await page.mouse.move(canvas.x+canvas.width*.6,canvas.y+canvas.height*.6,{steps:10});await page.mouse.up();await page.locator('#savePhotoEdit').click();
  // Several independently described photo groups share one set of ratings.
- await page.locator('#addSubitem').click();await page.locator('#photoFiles').setInputFiles([fixture,fixture]);await page.locator('#photoGrid .photo-card').nth(1).waitFor();
+ await page.locator('#addSubitem').click();await page.waitForFunction(()=>!document.querySelector('#addSubitem').disabled);
+ await page.locator('#photoFiles').setInputFiles([fixture,fixture]);await page.locator('#photoGrid .photo-card').nth(1).waitFor();
  await page.waitForFunction(()=>!document.querySelector('#addSubitem').disabled);await saved(page);
  await page.locator('#observationText').fill('SECOND SUBITEM browser condition');await page.locator('#recommendationText').fill('Second subitem recommendation');
  await page.locator('.subitem-select').nth(0).click();assert((await page.locator('#observationText').inputValue()).includes('FIRST'));
@@ -46,8 +47,12 @@ async function seedItem(page,text,fixture){
  await seedItem(page,'SECOND browser condition',fixture);await page.locator('#saveItem').click();await saved(page);
  await page.locator('#reportSections summary').click();await page.locator('#savedItems').scrollIntoViewIfNeeded();
  const handles=page.locator('#savedItems .item-drag-handle');assert.equal(await handles.count(),2);
- const a=await handles.nth(0).boundingBox(),b=await handles.nth(1).boundingBox();await page.mouse.move(a.x+a.width/2,a.y+a.height/2);await page.mouse.down();await page.mouse.move(b.x+b.width/2,b.y+b.height+10,{steps:15});await page.mouse.up();await saved(page);
- assert((await page.locator('#savedItems').textContent()).indexOf('SECOND')<(await page.locator('#savedItems').textContent()).indexOf('FIRST'));
+ const order=await page.locator('#savedItems .saved-item').evaluateAll(rows=>rows.map(row=>row.dataset.itemId));
+ const a=await handles.nth(0).boundingBox(),b=await page.locator('#savedItems .saved-item').nth(1).boundingBox();
+ // A handle remains small even when the item's independently described groups
+ // make its card taller. Drop past the whole destination card's midpoint.
+ await page.mouse.move(a.x+a.width/2,a.y+a.height/2);await page.mouse.down();await page.mouse.move(a.x+a.width/2,b.y+b.height*.7,{steps:15});await page.mouse.up();await saved(page);
+ assert.deepEqual(await page.locator('#savedItems .saved-item').evaluateAll(rows=>rows.map(row=>row.dataset.itemId)),order.reverse());
  // The first request is delayed while newer edits are made. No false "saved" state.
  let delayed=false;await page.route('**/api/save',async route=>{if(!delayed){delayed=true;await new Promise(r=>setTimeout(r,1200));}await route.continue();});
  await page.locator('#meta_site').fill('Queued A');await page.locator('#saveStatus').filter({hasText:'正在保存'}).waitFor();await page.locator('#meta_site').fill('Queued B');
