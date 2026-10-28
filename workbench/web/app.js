@@ -6,9 +6,14 @@ const subitemCountText=count=>WorkbenchI18n.language==='en'?count+(count===1?' s
 const fields=['element','condition_rating','likelihood','severity','priority'];
 const sectionLabels={introduction:t('Introduction · 项目介绍'),remedial_works:t('Recommended Remedial Works · 修复工程建议'),conclusion:t('Conclusion · 结论'),cost_estimate:t('Cost Estimate · 费用估算说明')};
 const labels={element:t('Element · 构件'),condition_rating:t('Condition Rating · 状况'),likelihood:t('Likelihood · 发生可能性'),severity:t('Severity · 严重程度'),priority:t('Priority · 处理优先级')};
-const metadataLabels={site:t('地点 / 资产名称 *'),client:t('客户'),report_number:t('报告编号 *'),project_number:t('项目编号 *'),revision:'Revision',report_date:t('报告日期'),purpose:'Purpose of issue',issued_to:'Issued to',document_name:t('文档名称（留空自动生成）'),prepared_by:'Prepared by',reviewed_by:'Reviewed by'};
+const metadataLabels={site:t('地点 / 资产名称 *'),client:t('客户'),report_number:t('报告编号 *'),project_number:t('项目编号 *'),revision:'Revision',report_date:t('报告日期'),purpose:'Purpose of issue',issued_to:'Issued to',document_name:t('文档名称（留空自动生成）'),prepared_by:'Prepared by',reviewed_by:'Reviewed by',location:t('项目地点'),subject:t('报告主题')};
 const personRoles={prepared_by:{role:'author',label:t('作者 / Prepared by'),prefix:'author'},reviewed_by:{role:'reviewer',label:t('审阅者 / Reviewed by'),prefix:'reviewer'}};
 let boot,project=null,busy=false,toastTimer,saver,previewJob=null,previewTimer;
+const previewJobs=new Map();let downloadFormatWhenReady=null;
+const templateId=()=>project?.template_id||'inspection';
+function downloadReport(result,format='docx'){
+ const a=node('a');a.href='/api/download?id='+result.id+'&format='+format+'&name='+encodeURIComponent(result.name);a.download=result.name;document.body.append(a);a.click();a.remove();
+}
 let personnelEditorId=null,personnelDirty=false;
 let itemDrag=null;
 let photoEditor=null;
@@ -48,7 +53,7 @@ async function downloadRecovery(){
  if(!response.ok)throw new Error(t((await response.json()).error));
  const url=URL.createObjectURL(await response.blob()),a=node('a');a.href=url;a.download='unsaved-draft.inspection.zip';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast(t('当前修改与照片已下载；完成冲突处理前，请保留当前页面。'));
 }
-function setBusy(value){busy=value;for(const id of ['newProject','projectSelect','saveSections','saveItem','addSubitem','previewButton','generateButton','backupButton','restoreButton','resetEditor','exitButton','libraryButton','managePersonnel','savePersonnel','deletePersonnel','newPersonnel','closePersonnel','languageSelect'])if($(id))$(id).disabled=value;if($('reportSummary'))updateSummary();if(photoEditor)renderPhotoEditor();}
+function setBusy(value){busy=value;for(const id of ['templateSelect','newProject','projectSelect','saveSections','saveItem','addSubitem','previewButton','generateButton','backupButton','restoreButton','resetEditor','exitButton','libraryButton','managePersonnel','savePersonnel','deletePersonnel','newPersonnel','closePersonnel','languageSelect'])if($(id))$(id).disabled=value;if($('reportSummary'))updateSummary();if(photoEditor)renderPhotoEditor();CalculationWorkbench.setBusy(value);}
 function action(fn){return async event=>{if(busy)return;setBusy(true);try{await fn(event);}catch(e){toast(e.message);}finally{setBusy(false);}};}
 function confirmAction(title,text){
  $('confirmTitle').textContent=title;$('confirmText').textContent=text;const d=$('confirmDialog');d.showModal();
@@ -63,6 +68,8 @@ function buildFields(){
  for(const [key,label] of Object.entries(metadataLabels)){
   if(personRoles[key]){buildPersonField(key);continue;}
   const box=node('label',label);const input=node('input');input.id='meta_'+key;input.type=key==='report_date'?'date':'text';input.maxLength=500;
+  if(['location','subject'].includes(key))box.dataset.calOnly='';
+  if(['purpose','issued_to','document_name'].includes(key))box.dataset.inspectionOnly='';
   input.addEventListener('input',()=>{project.metadata[key]=input.value;updateTitle();scheduleSave();});box.append(input);$('metadataFields').append(box);
  }
  for(const key of fields){
@@ -203,8 +210,8 @@ function renderLibrary(key){
  $(key+'Count').textContent=search?t("{0} 个结果",rows.length):t("{0} 条",boot.library[key].length);
 }
 function updateTitle(){
- $('projectTitle').textContent=project.metadata.site||t('新的检查报告');
- $('projectSubtitle').textContent=project.metadata.report_number?project.metadata.report_number+' · '+(project.metadata.client||t('客户未填写')):t('先填写报告信息，再整理现场照片。');
+ $('projectTitle').textContent=project.metadata.site||(templateId()==='calculation'?t('新的计算报告'):t('新的检查报告'));
+ $('projectSubtitle').textContent=project.metadata.report_number?project.metadata.report_number+' · '+(project.metadata.client||t('客户未填写')):(templateId()==='calculation'?t('按章节编排文字、表格和计算截图。'):t('先填写报告信息，再整理现场照片。'));
 }
 function updateSummary(){
  if(!project)return;
@@ -214,7 +221,7 @@ function updateSummary(){
 }
 function renderProjects(){
  const select=$('projectSelect');select.replaceChildren();
- for(const p of boot.projects){const count=WorkbenchI18n.language==='en'?' · '+p.count+(p.count===1?' item':' items'):t(" · {0} 项",p.count);const op=node('option',(p.site||t('未命名报告'))+count);op.value=p.id;select.append(op);}
+ for(const p of boot.projects.filter(p=>(p.template_id||'inspection')===templateId())){const count=WorkbenchI18n.language==='en'?' · '+p.count+(p.count===1?' item':' items'):t(" · {0} 项",p.count);const op=node('option',(p.site||t('未命名报告'))+count);op.value=p.id;select.append(op);}
  if(project){if(!boot.projects.some(p=>p.id===project.id)){const op=node('option',project.metadata.site||t('新的检查报告'));op.value=project.id;select.prepend(op);}select.value=project.id;}
 }
 function renderEditor(){
@@ -509,7 +516,15 @@ function renderItems(){
  });updateSummary();updateEditorTitle();
 }
 function editorHasContent(){return project.editor.subitems.some(g=>g.photos.length||g.observation||g.recommendation);}
-function loadProject(value){project=value;activeSubitemId=null;project.sections??={};project.cost_rows??=[];renderCosts();saver.reset(value.revision);for(const key of Object.keys(sectionLabels))$('section_'+key).value=project.sections[key]||'';for(const key of Object.keys(metadataLabels))if(!personRoles[key])$('meta_'+key).value=project.metadata[key]||'';renderPersonChoices();updateTitle();renderEditor();renderItems();renderProjects();}
+function loadProject(value){
+ if(project&&previewJob)previewJobs.set(project.id,previewJob);
+ clearTimeout(previewTimer);downloadFormatWhenReady=null;previewJob=previewJobs.get(value.id)||null;
+ project=value;activeSubitemId=null;project.sections??={};project.cost_rows??=[];renderCosts();saver.reset(value.revision);
+ for(const key of Object.keys(sectionLabels))$('section_'+key).value=project.sections[key]||'';
+ for(const key of Object.keys(metadataLabels))if(!personRoles[key])$('meta_'+key).value=project.metadata[key]||'';
+ renderPersonChoices();updateTitle();renderEditor();renderItems();renderProjects();CalculationWorkbench.render();
+ localStorage.setItem('lastProject_'+templateId(),project.id);localStorage.setItem('lastProject',project.id);
+}
 async function uploadPhotos(files){
  if(!files.length)return;if(itemPhotos(project.editor).length+files.length>100)throw new Error(t('一个检查项最多 100 张照片'));
  const group=currentSubitem(),failures=[];
@@ -534,8 +549,10 @@ async function saveItem(){
  catch(error){if(error.code!=='revision_conflict'){project.editor=previous;project.editor_id=previousId;if(index<0)project.items.pop();else project.items[index]=previousItem;}renderItems();renderEditor();throw error;}
 }
 async function beginPreview(){
+ const description=$('reportPreviewDialog').querySelector(':scope > p');
+ description.textContent=templateId()==='calculation'?t('预览使用提交时的报告快照，由桌面 Excel 排版。Excel、Word 和 PDF 下载均对应这份快照。'):t('预览包含已保存检查项和提交时的报告章节。下载的 Word 与此次预览使用同一份报告。');
  if(previewJob){if(!$('reportPreviewDialog').open)$('reportPreviewDialog').showModal();await pollPreview();return;}
- await flush();if(editorHasContent()&&!(await confirmAction(t('预览已保存的检查项'),t('当前编辑区还有内容。预览只包含已保存检查项；若要包含当前项，请取消后点击 Save。'))))return;
+ await flush();if(templateId()!=='calculation'&&editorHasContent()&&!(await confirmAction(t('预览已保存的检查项'),t('当前编辑区还有内容。预览只包含已保存检查项；若要包含当前项，请取消后点击 Save。'))))return;
  clearTimeout(previewTimer);$('reportPreviewPages').replaceChildren();$('previewDownloads').hidden=true;$('retryPreview').hidden=true;
  if(!$('reportPreviewDialog').open)$('reportPreviewDialog').showModal();$('previewProgress').textContent=t('正在提交报告快照…');
  try{previewJob=await api('/api/preview',{id:project.id});updateSummary();await pollPreview();}
@@ -543,8 +560,9 @@ async function beginPreview(){
 }
 async function pollPreview(){
  if(!previewJob)return;
+ const jobId=previewJob.id,projectId=project.id;
  try{
-  const result=await api('/api/preview-job?id='+previewJob.id);previewJob=result;$('previewProgress').textContent=t(result.message);
+  const result=await api('/api/preview-job?id='+jobId);if(project.id!==projectId||previewJob?.id!==jobId)return;previewJob=result;$('previewProgress').textContent=t(result.message);
   $('previewSnapshot').textContent=t("{0} · 草稿版本 {1}（后续编辑不会改变此份预览）",result.site,result.project_revision);
   if(result.status==='failed')throw new Error(t(result.error));
   if(result.status==='ready'){
@@ -552,22 +570,34 @@ async function pollPreview(){
    for(let page=1;page<=result.pages;page++){
     const sheet=node('figure'),image=node('img');image.src='/api/preview-page?id='+result.report_id+'&page='+page;image.alt=t('报告第 ')+page+t(' 页');image.loading='lazy';sheet.append(image,node('figcaption',t('第 ')+page+' / '+result.pages+t(' 页')));$('reportPreviewPages').append(sheet);
    }
-   $('openPreviewPdf').href='/api/preview-pdf?id='+result.report_id;$('downloadPreviewWord').href='/api/download?id='+result.report_id+'&name='+encodeURIComponent(result.name);$('downloadPreviewWord').download=result.name;
+   const wordName=result.name.replace(/\.xlsx$/,'.docx');
+   $('openPreviewPdf').href='/api/preview-pdf?id='+result.report_id;$('downloadPreviewWord').href='/api/download?id='+result.report_id+'&name='+encodeURIComponent(wordName);$('downloadPreviewWord').download=wordName;
+   let excel=$('downloadPreviewExcel');if(!excel){excel=node('a',t('下载此份 Excel'),'button');excel.id='downloadPreviewExcel';$('previewDownloads').append(excel);}excel.hidden=result.format!=='xlsx';excel.href='/api/download?id='+result.report_id+'&format=xlsx&name='+encodeURIComponent(result.name);excel.download=result.name;
+   if(downloadFormatWhenReady){const format=downloadFormatWhenReady;downloadFormatWhenReady=null;downloadReport({id:result.report_id,name:result.name.replace(/\.xlsx$/,'.'+format)},format);}
    $('previewDownloads').hidden=false;$('retryPreview').hidden=false;$('retryPreview').textContent=t('重新预览已保存报告');updateSummary();return;
   }
   previewTimer=setTimeout(pollPreview,600);
- }catch(error){previewJob=null;$('previewProgress').textContent=error.message;$('retryPreview').hidden=false;updateSummary();}
+ }catch(error){if(project.id!==projectId||previewJob?.id!==jobId)return;previewJob=null;$('previewProgress').textContent=error.message;$('retryPreview').hidden=false;updateSummary();}
 }
 async function init(){
  await WorkbenchI18n.ready;WorkbenchI18n.apply();
  boot=await api('/api/bootstrap');buildFields();setupPhotoEditor();$('dataFolder').textContent=t('数据目录：')+boot.data_folder;
+ $('templateSelect').replaceChildren(...boot.templates.map(template=>{const option=node('option',template.name);option.value=template.id;return option;}));
  window.addEventListener('blur',clearItemDrag);window.addEventListener('resize',clearItemDrag);
  $('appVersion').textContent='Version '+boot.version+t(' · 本地运行 · 无需登录');
  saver=new WorkbenchState.DraftSaver({snapshot:()=>project,send:snapshot=>api('/api/save',snapshot),onChange:saveStatus,onConflict:openSaveConflict,onSaved:saved=>{
   if(project.id===saved.id){project.revision=saved.revision;project.updated=saved.updated;}
-  const entry={id:saved.id,site:saved.metadata.site,report_number:saved.metadata.report_number,updated:saved.updated,count:saved.items.length},index=boot.projects.findIndex(p=>p.id===saved.id);
+  const entry={id:saved.id,template_id:saved.template_id||'inspection',site:saved.metadata.site,report_number:saved.metadata.report_number,updated:saved.updated,count:saved.modules?.length??saved.items.length},index=boot.projects.findIndex(p=>p.id===saved.id);
   if(index>=0)boot.projects[index]=entry;else boot.projects.unshift(entry);renderProjects();
  }});
+ CalculationWorkbench.init({getProject:()=>project,schedule:scheduleSave,save:flush,api,action,confirm:confirmAction,notify:toast,download:downloadReport,preview:async format=>{downloadFormatWhenReady=format||null;previewJob=null;await beginPreview();}});
+ $('templateSelect').onchange=action(async event=>{
+  const next=event.target.value;event.target.value=templateId();
+  if(personnelDirty||photoEditor?.operations.length){toast(t('请先保存人员资料或照片编辑，再切换报告模板。'));return;}
+  await flush();boot.projects=(await api('/api/bootstrap')).projects;
+  const last=localStorage.getItem('lastProject_'+next),draft=boot.projects.find(p=>p.id===last&&(p.template_id||'inspection')===next)||boot.projects.find(p=>(p.template_id||'inspection')===next);
+  loadProject(draft?await api('/api/project?id='+draft.id):await api('/api/new',{template_id:next}));
+ });
  if($('languageSelect')){
  $('languageSelect').value=WorkbenchI18n.language;
  $('languageSelect').onchange=action(async event=>{
@@ -594,8 +624,8 @@ async function init(){
  try{const previous=JSON.parse(sessionStorage.getItem('workbenchLanguagePreview'));if(previous?.project===project.id){previewJob=previous.job;updateSummary();}sessionStorage.removeItem('workbenchLanguagePreview');}catch{}
  $('saveItem').onclick=action(saveItem);
  $('addSubitem').onclick=action(async()=>{if(project.editor.subitems.length>=100)throw new Error(t('每个检查项需要 1 至 100 个子项'));const group=blankSubitem();project.editor.subitems.push(group);activeSubitemId=group.id;renderEditor();await flush();});
- $('newProject').onclick=action(async()=>{await flush();loadProject(await api('/api/new',{}));boot.projects=(await api('/api/bootstrap')).projects;renderProjects();localStorage.setItem('lastProject',project.id);$('reportDetails').open=true;});
- $('projectSelect').onchange=action(async e=>{const id=e.target.value;await flush();loadProject(await api('/api/project?id='+id));localStorage.setItem('lastProject',id);});
+ $('newProject').onclick=action(async()=>{await flush();loadProject(await api('/api/new',{template_id:templateId()}));boot.projects=(await api('/api/bootstrap')).projects;renderProjects();localStorage.setItem('lastProject',project.id);$('reportDetails').open=true;});
+ $('projectSelect').onchange=action(async e=>{const id=e.target.value;e.target.value=project.id;await flush();loadProject(await api('/api/project?id='+id));localStorage.setItem('lastProject',id);});
  $('resetEditor').onclick=action(async()=>{if(editorHasContent()&&!(await confirmAction(t('清空当前编辑区'),t('已保存检查项保持不变。当前编辑区的照片和未保存文字会从草稿中移除。'))))return;project.editor=blankEditor();project.editor_id=null;renderEditor();await flush();});
  $('dropzone').onclick=()=>{if(!busy)$('photoFiles').click();};$('dropzone').onkeydown=e=>{if((e.key==='Enter'||e.key===' ')&&!busy){e.preventDefault();$('photoFiles').click();}};
  $('photoFiles').onchange=action(async e=>{const files=[...e.target.files];e.target.value='';await uploadPhotos(files);});

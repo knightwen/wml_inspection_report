@@ -2,6 +2,28 @@
 
 本地检查报告工作台，当前版本 **0.1.6**。支持共用评级的检查项、带多张照片和独立描述的子项、可编辑的 Observation / Recommendation，并按 Word 模板生成 DOCX 报告。
 
+## 多模板工作台（开发中）
+
+左上角“报告模板”可切换 Inspection Report 和 Calculation Report。草稿按类型分别显示；切换前保存当前修改，保存失败或冲突时保留当前报告。旧版 Inspection 草稿仍可直接打开。
+
+Calculation Report 是报告编辑工具，工程计算在外部完成。新建时仅预加载 References、Design Criteria、Load Engineering（Load Cases / Load Combinations / Load Inputs）及 Analysis Results（Strength / Serviceability）的章节名称。项目资料、正文、表格、照片及人员选择均为空；公司 Logo 和页头版式固定。封面简介、材料说明和修订记录可以另行填写。
+
+- 章节支持增删、重命名、子章节、同级拖动排序、增加/减少缩进、上下移动和“从新页开始”。编号和目录随当前结构更新，最多六级。调整仅保存到当前草稿，新建报告仍使用默认空白结构。
+- 章节中可混排文字、可编辑表格和图片，通过上下按钮调整内容顺序。表格支持从 Excel 复制粘贴（含多行单元格）；粘贴的公式作为文字保存，不执行计算。图片支持批量上传、粘贴截图、旋转、宽度和图注。草稿备份包含所有模块、封面、照片和原图。
+- “预览模板”随时打开空白版式与当前章节结构，不调用保存、生成或 Office 转换；内容块仅以空白样式占位显示。它用于查看样式，实际分页以“预览报告”为准。
+- CAL 支持 `.xlsx`、`.docx` 和 PDF。Excel 和 PDF 导出使用本机已安装并激活的桌面 Excel，根据原模板的 A4 纵向、页边距、绿色分隔和固定项目信息栏排版。每个打印页重复 WML Logo 和项目信息；目录页码从实际打印页校准。Word 为可编辑的同内容版本，分页可不同，打开后可更新目录字段。
+- 正式预览基于提交时的固定草稿快照，后台转换期间可继续编辑。预览窗口提供对应快照的 Excel、Word 和 PDF。Excel 不可用时仍可通过服务接口生成基础 XLSX/DOCX，正式打印预览和 PDF 会给出失败原因。
+
+新增验证命令（先安装完整 `requirements.txt`）：
+
+```powershell
+python workbench/test_calculation.py
+node tools/test_calculation_browser.cjs
+python tools/test_calculation_native.py
+```
+
+浏览器测试沿用下文的 Playwright 开发依赖；真实 Excel 集成测试应在正常 Windows 桌面用户会话中执行。测试使用 `.build/qa/` 的独立数据，不会打开或修改原始 CAL 项目文件。此开发变更未发布新便携版本。
+
 封面编号使用“项目编号-报告编号”，例如 `12477` + `SIR-004` → `12477-SIR-004`。报告编号已含项目编号前缀时不会重复添加。中英文版使用相同规则。
 
 提供中英文切换版和独立纯英文版，同时发布为两个 Windows 便携 ZIP。纯英文版固定英文界面，配套英文示例人员、措辞库 Excel 说明和使用说明；中文版继续保留，两版均支持子项。

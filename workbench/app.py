@@ -14,6 +14,7 @@ from version import __version__
 from preview import PreviewManager,word_capability
 from ratings import DEFAULT_RATING_OPTIONS
 from inspection_items import blank_item, normalize_project, all_photos
+from report_types import REPORT_TYPES, report_type, new_modules, calculation_photos, validate_calculation
 
 pillow_heif.register_heif_opener()
 Image.MAX_IMAGE_PIXELS = 100_000_000
@@ -22,7 +23,7 @@ WEB=Path(getattr(sys,'_MEIPASS',Path(__file__).parent))/'web'
 UI_CONFIG=json.loads((RESOURCES/'ui_config.json').read_text(encoding='utf-8'))
 LIBRARY_POLICY=json.loads((RESOURCES/'library_policy.json').read_text(encoding='utf-8'))
 ID=re.compile(r'^[a-f0-9]{32}$')
-METADATA=['site','client','report_number','project_number','revision','report_date','prepared_by','reviewed_by','purpose','issued_to','document_name','author_qualifications','reviewer_qualifications','author_title','reviewer_title']
+METADATA=['site','client','report_number','project_number','revision','report_date','prepared_by','reviewed_by','purpose','issued_to','document_name','author_qualifications','reviewer_qualifications','author_title','reviewer_title','location','subject']
 from costs import validate_rows
 SECTION_FIELDS=['introduction','remedial_works','conclusion','cost_estimate']
 PERSON_REFERENCES=['prepared_by_id','reviewed_by_id']
@@ -151,17 +152,24 @@ class Store:
         result=[]
         for path in (self.path/'projects').glob('*.json'):
             p=json.loads(path.read_text(encoding='utf-8'))
-            result.append({'id':p['id'],'site':p['metadata']['site'],'report_number':p['metadata']['report_number'],'updated':p['updated'],'count':len(p['items'])})
+            result.append({'id':p['id'],'template_id':report_type(p),'site':p['metadata']['site'],'report_number':p['metadata']['report_number'],'updated':p['updated'],'count':len(p.get('modules',[])) if report_type(p)=='calculation' else len(p['items'])})
         return sorted(result,key=lambda p:p['updated'],reverse=True)
 
-    def new(self):
+    def new(self,template_id='inspection'):
+        if template_id not in {r['id'] for r in REPORT_TYPES}:raise ValueError('Unknown report template')
         p={'id':secrets.token_hex(16),'revision':0,'updated':datetime.now().isoformat(timespec='seconds'),
            'metadata':dict.fromkeys(METADATA,''),'sections':dict.fromkeys(SECTION_FIELDS,''),'cost_rows':[],'items':[],'editor':blank_item(),'editor_id':None,'schema_version':2}
         p['metadata'].update({'client':'Town of Port Hedland','revision':'A','purpose':'Information','report_date':date.today().isoformat()})
+        p['template_id']=template_id
+        if template_id=='calculation':
+            p['metadata']=dict.fromkeys(METADATA,'')
+            p['modules']=new_modules()
+            p['cal_cover']={'introduction':'','materials':'','revisions':[]}
         atomic_json(self.path_for_project(p['id']),p);return p
 
     def validate(self,p):
         identifier(p['id'])
+        if report_type(p) not in {r['id'] for r in REPORT_TYPES}:raise ValueError('Unknown report template')
         validate_rows(p.setdefault('cost_rows',[]))
         sections=p.setdefault('sections',dict.fromkeys(SECTION_FIELDS,''))
         if not isinstance(sections,dict):raise ValueError('报告章节格式不正确')
@@ -175,6 +183,10 @@ class Store:
             if not isinstance(value,str) or len(value)>500:raise ValueError('报告信息过长')
         for key in PERSON_REFERENCES:
             if p['metadata'].get(key):identifier(p['metadata'][key])
+        if report_type(p)=='calculation':
+            if p['metadata'].get('report_date'):date.fromisoformat(p['metadata']['report_date'])
+            validate_calculation(p,self.catalog)
+            return
         date.fromisoformat(p['metadata']['report_date'])
         itemids=set()
         for index,item in enumerate([*p['items'],p.get('editor',{})]):
@@ -212,6 +224,7 @@ class Store:
     def save(self,p):
         with self.lock:
             self.validate(p);path=self.path_for_project(p['id']);existing=self.load(p['id'])
+            if report_type(p)!=report_type(existing):raise ValueError('Cannot change the template of an existing draft')
             if type(p.get('revision')) is not int or existing['revision']!=p['revision']:raise RevisionConflict('草稿已在其他页面更新。请先保留当前修改，再加载最新版本。')
             for key,prefix in [('prepared_by','author'),('reviewed_by','reviewer')]:
                 ref=key+'_id'
@@ -312,17 +325,27 @@ class Store:
     def report_snapshot(self,pid):
         with self.lock:
             p=self.load(pid);self.validate(p)
+            if report_type(p)=='calculation':return deepcopy(p)
             if not p['items']:raise ValueError('请先保存至少一个检查项')
             if any(not p['metadata'].get(k,'').strip() for k in ['site','report_number','project_number']):raise ValueError('请先填写地点、报告编号和项目编号')
             return deepcopy(p)
 
-    def export_snapshot(self,p):
-        eid=secrets.token_hex(16);path=self.path/'exports'/(eid+'.docx')
-        generate_report(RESOURCES/'report_template.docx',p,self.photo_path,path)
-        name=re.sub(r'[<>:"/\\|?*\x00-\x1f]','_',p['metadata']['report_number']+'_REV'+p['metadata']['revision']+'-'+p['metadata']['site'])[:170]+'.docx'
-        return {'id':eid,'name':name}
+    def export_snapshot(self,p,format=None,export_id=None):
+        kind=report_type(p);format=format or ('xlsx' if kind=='calculation' else 'docx')
+        allowed=next(r['formats'] for r in REPORT_TYPES if r['id']==kind)
+        if format not in allowed or format=='pdf':raise ValueError('Use report preview to export PDF')
+        eid=export_id or secrets.token_hex(16);path=self.path/'exports'/(eid+'.'+format)
+        if kind=='calculation':
+            from calculation_engine import generate_xlsx,generate_docx
+            (generate_xlsx if format=='xlsx' else generate_docx)(p,self.photo_path,RESOURCES,path)
+        else:generate_report(RESOURCES/'report_template.docx',p,self.photo_path,path)
+        base=p['metadata'].get('report_number') or ('Calculation Report' if kind=='calculation' else 'Report')
+        if p['metadata'].get('revision'):base+='_REV'+p['metadata']['revision']
+        if p['metadata'].get('site'):base+='-'+p['metadata']['site']
+        name=re.sub(r'[<>:"/\\|?*\x00-\x1f]','_',base)[:170]+'.'+format
+        return {'id':eid,'name':name,'format':format}
 
-    def export(self,pid):return self.export_snapshot(self.report_snapshot(pid))
+    def export(self,pid,format=None):return self.export_snapshot(self.report_snapshot(pid),format)
 
     def preview(self,pid):
         return self.previews.start(self.report_snapshot(pid))
@@ -334,6 +357,7 @@ class Store:
         with self.lock:
             p=deepcopy(p);self.validate(p)
             photoids={ph['id'] for item in [*p['items'],p['editor']] for ph in all_photos(item)}
+            if report_type(p)=='calculation':photoids.update(ph['id'] for ph in calculation_photos(p))
             result=BytesIO()
             with zipfile.ZipFile(result,'w',zipfile.ZIP_DEFLATED) as z:
                 z.writestr('project.json',json.dumps(p,ensure_ascii=False))
@@ -358,6 +382,8 @@ class Store:
                 prepared.append((new,{**ph,'id':new},original,converted))
             for item in [*p['items'],p['editor']]:
                 for ph in all_photos(item):ph['id']=mapping[ph['id']]
+            if report_type(p)=='calculation':
+                for ph in calculation_photos(p):ph['id']=mapping[ph['id']]
             p['id']=secrets.token_hex(16);p['revision']=0;p['updated']=datetime.now().isoformat(timespec='seconds')
             previous=self.catalog.copy()
             try:
@@ -399,7 +425,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self.authorized():self.reply({'error':'请从程序启动的页面打开工作台'},403);return
         try:
             s=self.server.store
-            if url.path=='/api/bootstrap':self.reply({'library':s.library,'options':s.options,'personnel':s.personnel,'projects':s.list(),'data_folder':str(s.path),'version':__version__,'edition':UI_CONFIG['edition'],'preview_capability':word_capability()});return
+            if url.path=='/api/bootstrap':self.reply({'templates':REPORT_TYPES,'library':s.library,'options':s.options,'personnel':s.personnel,'projects':s.list(),'data_folder':str(s.path),'version':__version__,'edition':UI_CONFIG['edition'],'preview_capability':word_capability()});return
             if url.path=='/api/preview-job':self.reply(s.previews.get(identifier(query['id'][0])));return
             if url.path=='/api/preview-capability':self.reply(word_capability());return
             if url.path=='/api/personnel':self.reply(s.personnel);return
@@ -407,8 +433,11 @@ class Handler(BaseHTTPRequestHandler):
             if url.path.startswith('/photos/'):
                 pid=url.path.split('/')[-1].removesuffix('.jpg');self.send_bytes(s.photo_path(pid).read_bytes(),'image/jpeg');return
             if url.path=='/api/download':
-                eid=identifier(query['id'][0]);path=s.path/'exports'/(eid+'.docx')
-                self.send_bytes(path.read_bytes(),'application/vnd.openxmlformats-officedocument.wordprocessingml.document',filename=query.get('name',['report.docx'])[0]);return
+                eid=identifier(query['id'][0]);format=query.get('format',['docx'])[0]
+                kinds={'docx':'application/vnd.openxmlformats-officedocument.wordprocessingml.document','xlsx':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','pdf':'application/pdf'}
+                if format not in kinds:raise ValueError('Invalid download format')
+                path=s.path/'exports'/(eid+'.'+format)
+                self.send_bytes(path.read_bytes(),kinds[format],filename=query.get('name',['report.'+format])[0]);return
             if url.path=='/api/preview-pdf':
                 eid=identifier(query['id'][0]);self.send_bytes((s.path/'exports'/(eid+'.pdf')).read_bytes(),'application/pdf');return
             if url.path=='/api/preview-page':
@@ -420,7 +449,8 @@ class Handler(BaseHTTPRequestHandler):
                 source=s.path/'library.xlsx'
                 if not source.exists():source=RESOURCES/'word_library.xlsx'
                 self.send_bytes(source.read_bytes(),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',filename='word-library.xlsx');return
-            file={'/':'index.html','/app.js':'app.js','/draft-state.js':'draft-state.js','/interface.js':'interface.js','/i18n.js':'i18n.js','/translations-en.js':'translations-en.js','/style.css':'style.css','/favicon.svg':'favicon.svg'}.get(url.path)
+            if url.path=='/wml-logo.png':self.send_bytes((RESOURCES/'wml-logo.png').read_bytes(),'image/png');return
+            file={'/':'index.html','/app.js':'app.js','/calculation.js':'calculation.js','/draft-state.js':'draft-state.js','/interface.js':'interface.js','/i18n.js':'i18n.js','/translations-en.js':'translations-en.js','/style.css':'style.css','/favicon.svg':'favicon.svg'}.get(url.path)
             if not file:self.reply({'error':'Not found'},404);return
             self.send_bytes((WEB/file).read_bytes(),mimetypes.guess_type(file)[0] or 'text/plain')
         except Exception as exc:
@@ -437,7 +467,7 @@ class Handler(BaseHTTPRequestHandler):
             limit=1_500_000_000 if path=='/api/restore' else 80_000_000 if path in ['/api/photo','/api/library'] else 5_000_000
             if length>limit:raise ValueError('文件过大')
             content=self.rfile.read(length);s=self.server.store
-            if path=='/api/new':self.reply(s.new());return
+            if path=='/api/new':self.reply(s.new(json.loads(content or b'{}').get('template_id','inspection')));return
             if path=='/api/project-copy':self.reply(s.copy_project(json.loads(content)));return
             if path=='/api/recovery-backup':self.send_bytes(s.backup_snapshot(json.loads(content)),'application/zip',filename='unsaved-draft.inspection.zip');return
             if path=='/api/personnel':self.reply(s.save_personnel(json.loads(content)));return
@@ -446,7 +476,8 @@ class Handler(BaseHTTPRequestHandler):
             if path=='/api/photo-edit':
                 edit=json.loads(content);self.reply(s.edit_photo(edit['id'],edit['operations']));return
             if path=='/api/save':self.reply(s.save(json.loads(content)));return
-            if path=='/api/generate':self.reply(s.export(json.loads(content)['id']));return
+            if path=='/api/generate':
+                request=json.loads(content);self.reply(s.export(request['id'],request.get('format')));return
             if path=='/api/preview':self.reply(s.preview(json.loads(content)['id']));return
             if path=='/api/restore':self.reply(s.restore(content));return
             if path=='/api/library':

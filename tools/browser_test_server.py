@@ -18,12 +18,13 @@ def fake_converter(source,resources,cancel):
         if cancel.is_set():raise ValueError('QA preview cancelled')
         time.sleep(.1)
     with zipfile.ZipFile(source) as package:
-        if b'QA FAIL PREVIEW' in package.read('word/document.xml'):raise ValueError('QA conversion failure: please retry')
+        part='xl/worksheets/sheet3.xml' if source.suffix=='.xlsx' else 'word/document.xml'
+        if b'QA FAIL PREVIEW' in package.read(part):raise ValueError('QA conversion failure: please retry')
     pdf=source.with_suffix('.pdf');pdf.write_bytes(fixture_pdf());return pdf
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser();parser.add_argument('--data-dir',required=True);args=parser.parse_args()
-    store=app.Store(args.data_dir);store.previews=PreviewManager(store,app.RESOURCES,converter=fake_converter,capability=lambda:{'available':True})
+    store=app.Store(args.data_dir);store.previews=PreviewManager(store,app.RESOURCES,converter=fake_converter,capability=lambda:{'available':True},excel_converter=fake_converter,excel_check=lambda:{'available':True})
     server=app.ThreadingHTTPServer(('127.0.0.1',0),app.Handler);server.daemon_threads=True;server.store=store;server.token=secrets.token_hex(32)
     print(json.dumps({'port':server.server_port,'token':server.token}),flush=True)
     try:server.serve_forever(poll_interval=.2)

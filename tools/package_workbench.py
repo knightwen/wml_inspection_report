@@ -22,14 +22,16 @@ def copy_licenses(target):
     shutil.copyfile(ROOT / 'LICENSE', target / 'Application.txt')
     shutil.copyfile(Path(sys.base_prefix) / 'LICENSE.txt', target / 'Python.txt')
     versions = {}
-    for name in ('Pillow', 'pillow-heif', 'lxml', 'pypdfium2', 'PyInstaller', 'pyinstaller-hooks-contrib'):
+    for name in ('Pillow', 'pillow-heif', 'lxml', 'pypdfium2', 'PyInstaller', 'pyinstaller-hooks-contrib','openpyxl','python-docx','et_xmlfile','typing_extensions'):
         dist = importlib.metadata.distribution(name)
         versions[name] = dist.version
         files = [f for f in dist.files or [] if '.dist-info/licenses/' in str(f).replace('\\', '/')]
         if not files:
+            files=[f for f in dist.files or [] if '.dist-info/' in str(f).replace('\\','/') and Path(f).name.lower().startswith(('license','licence','copying'))]
+        if not files:
             raise RuntimeError(f'Missing installed licenses for {name}')
         for f in files:
-            relative = str(f).replace('\\', '/').split('.dist-info/licenses/', 1)[1]
+            relative = str(f).replace('\\', '/').split('.dist-info/licenses/', 1)[1] if '.dist-info/licenses/' in str(f).replace('\\','/') else Path(f).name
             dest = target / name / relative
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(dist.locate_file(f), dest)

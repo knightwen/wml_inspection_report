@@ -1,5 +1,29 @@
 # Inspection Workbench 0.1.6 — English edition
 
+## Multi-template development version
+
+Use **Report template** at the upper left to switch between Inspection Report and
+Calculation Report. Drafts are separated by report type. Switching saves the
+current draft first; a failed save or conflict keeps your current report open.
+
+New CAL drafts contain chapter names only, with empty project information and
+content. Add, rename, delete, nest, drag or move chapters, then arrange text,
+editable tables and images within them. Paste cells from Excel or screenshots
+from the clipboard. Calculations remain external; pasted formulas are stored as
+text. Chapter changes belong only to the current draft. Backups include all
+chapters, cover information, images and original files.
+
+**Preview template** opens an instant blank style preview without saving,
+generating a document or starting Office. **Preview report**, PDF export and the
+prepared Excel download use installed, activated desktop Excel and its A4 print
+layout. Logo and project information repeat on every page. Directory page
+numbers are checked against the actual printed PDF. Word export contains the
+same editable report content; its pagination may differ. Update its contents
+field after opening in Word.
+
+These additions are available in the source/development version and have not
+been published as a new portable release.
+
 The report cover combines the project number and report number, for example
 `12477` and `SIR-004` produce `12477-SIR-004`. A report number that already
 starts with the project number is kept without adding the prefix again.

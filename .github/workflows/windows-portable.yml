@@ -43,6 +43,7 @@ jobs:
       - name: Test application
         run: |
           python workbench/test_workbench.py
+          python workbench/test_calculation.py
           python tools/test_english_assets.py
       - uses: actions/setup-node@v4
         with:
@@ -58,6 +59,7 @@ jobs:
           node tools/test_i18n.cjs
           node tools/test_draft_state.cjs
           node tools/test_browser_workbench.cjs
+          node tools/test_calculation_browser.cjs
       - name: Validate Word template and generated reports
         shell: powershell
         run: ./tools/validate_reports.ps1

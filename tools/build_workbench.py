@@ -30,6 +30,7 @@ def main():
         '--collect-all', 'pillow_heif',
         '--collect-all', 'pypdfium2',
         '--collect-all', 'pypdfium2_raw',
+        '--collect-data', 'docx',
         '--exclude-module', 'numpy', '--exclude-module', 'scipy',
         '--exclude-module', 'matplotlib', '--exclude-module', 'pandas',
         '--exclude-module', 'torch', '--exclude-module', 'tkinter',
