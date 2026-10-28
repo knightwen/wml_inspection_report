@@ -31,6 +31,9 @@
  }
  function renderTree(){
   const tree=$('calTree');tree.replaceChildren();
+  const cover=button(label('封面与报告标题','Cover and report title'),async()=>{
+   const panel=$('calCoverPanel');panel.open=true;panel.scrollIntoView({block:'start',behavior:'smooth'});$('calCoverReportTitle').focus({preventScroll:true});
+  },'cal-cover-link');tree.append(cover);
   for(const entry of entries()){
    const {module,number,siblings,index}=entry;
    const row=el('div',undefined,'cal-tree-row'+(module.id===active?' active':''));row.style.paddingLeft=(number.split('.').length-1)*16+'px';
@@ -121,7 +124,14 @@
  }
  function renderCover(){
   const host=$('calCoverFields');host.replaceChildren();
-  for(const [key,title] of [['introduction',label('简介','Introduction')],['materials',label('材料说明','Material properties')]])host.append(field(title,input(project().cal_cover[key],v=>project().cal_cover[key]=v,{multiline:true,rows:3})));
+  const cover=project().cal_cover;
+  host.append(el('p',label('在此编辑封面标题、正文及修订记录。项目信息和作者、审阅者在上方“报告信息”中填写。','Edit the cover title, content and revision history here. Project information, author and reviewer are edited under Report information.')));
+  for(const [key,title,initial,id] of [
+   ['title',label('报告标题（页头）','Report title (page header)'),'CALCULATION REPORT','calCoverReportTitle'],
+   ['introduction_title',label('简介标题','Introduction heading'),'INTRODUCTION','calCoverIntroductionTitle'],
+   ['materials_title',label('材料说明标题','Material properties heading'),'MATERIAL PROPERTIES','calCoverMaterialsTitle']
+  ]){const edit=input(cover[key]??initial,v=>cover[key]=v,{max:120});edit.id=id;host.append(field(title,edit));}
+  for(const [key,title,id] of [['introduction',label('简介正文','Introduction text'),'calCoverIntroduction'],['materials',label('材料说明正文','Material properties text'),'calCoverMaterials']]){const edit=input(cover[key],v=>cover[key]=v,{multiline:true,rows:3});edit.id=id;host.append(field(title,edit));}
   host.append(el('h3',label('修订记录','Revision history')));const revisions=el('div');revisions.id='calRevisions';host.append(revisions,button(label('＋ 修订记录','+ Revision'),async()=>{project().cal_cover.revisions.push({revision:'',date:'',status:'',designed:'',checked:'',approved:''});renderRevisions();changed();}));renderRevisions();
  }
  function render(){
@@ -138,7 +148,7 @@
   renderTree();renderEditor();renderCover();
  }
  function sheetHeader(cal){
-  const header=el('div',undefined,'template-sheet-header'),logo=el('img');logo.src='/wml-logo.png';logo.alt='WML';header.append(logo,el('strong',cal?'CALCULATION REPORT':'INSPECTION REPORT'));
+  const header=el('div',undefined,'template-sheet-header'),logo=el('img');logo.src='/wml-logo.png';logo.alt='WML';header.append(logo,el('strong',cal?(project().cal_cover.title??'CALCULATION REPORT'):'INSPECTION REPORT'));
   const details=el('div',undefined,'template-info');
   for(const name of cal?['Project','Job No.','Location','Rev.','Calc. No.','Date','Subject']:['Site','Project No.','Client','Rev.','Report No.','Date'])details.append(el('div',name+'：________________'));
   const wrapper=el('div');wrapper.append(header,details);return wrapper;
@@ -146,7 +156,7 @@
  function showTemplate(){
   const cal=project().template_id==='calculation',host=$('templatePreviewPages');host.replaceChildren();
   const addPage=()=>{const page=el('article',undefined,'template-sheet');page.append(sheetHeader(cal));host.append(page);return page;};
-  const cover=addPage();cover.append(el('h2',cal?'INTRODUCTION':'REPORT INFORMATION'),el('div','', 'template-blank'),el('h2',cal?'MATERIAL PROPERTIES':'PREPARED FOR'),el('div','','template-blank'),el('p','PREPARED BY：________________'),el('p','REVIEWED BY：________________'),el('p','REVISION  |  DATE  |  STATUS  |  DESIGNED  |  CHECKED  |  APPROVED'));
+  const cover=addPage();cover.append(el('h2',cal?(project().cal_cover.introduction_title??'INTRODUCTION'):'REPORT INFORMATION'),el('div','', 'template-blank'),el('h2',cal?(project().cal_cover.materials_title??'MATERIAL PROPERTIES'):'PREPARED FOR'),el('div','','template-blank'),el('p','PREPARED BY：________________'),el('p','REVIEWED BY：________________'),el('p','REVISION  |  DATE  |  STATUS  |  DESIGNED  |  CHECKED  |  APPROVED'));
   const page=addPage();page.append(el('h2',cal?'CONTENTS':'INSPECTION ITEMS'));
   if(cal){
    for(const {module,number} of entries()){const h=el('h3',number+'  '+module.title);h.style.marginLeft=number.split('.').length*8+'px';page.append(h);}

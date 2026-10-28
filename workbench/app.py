@@ -164,7 +164,7 @@ class Store:
         if template_id=='calculation':
             p['metadata']=dict.fromkeys(METADATA,'')
             p['modules']=new_modules()
-            p['cal_cover']={'introduction':'','materials':'','revisions':[]}
+            p['cal_cover']={'title':'CALCULATION REPORT','introduction_title':'INTRODUCTION','materials_title':'MATERIAL PROPERTIES','introduction':'','materials':'','revisions':[]}
         atomic_json(self.path_for_project(p['id']),p);return p
 
     def validate(self,p):

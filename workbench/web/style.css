@@ -8,6 +8,7 @@ body:not([data-report-type="calculation"]) [data-cal-only]{display:none}
 .cal-outline-heading button{padding:7px 9px}.cal-tree-row{display:flex;align-items:center;border-radius:6px;margin:3px 0}.cal-tree-row.active{background:var(--soft)}
 .cal-tree-select{background:transparent!important;border:0!important;text-align:left;justify-content:flex-start!important;white-space:normal!important;padding:9px 5px!important;width:100%;font-weight:500!important}
 .cal-drag{cursor:grab;padding:5px;color:var(--muted)}.cal-editor{padding:24px!important;min-height:420px;min-width:0}
+.cal-cover-link{width:100%;justify-content:flex-start;margin-bottom:12px;background:var(--soft)}
 .cal-editor-tools,.cal-add-content,.cal-block-toolbar,.cal-export-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.cal-editor-tools{margin:16px 0}.cal-editor-tools button{font-size:12px;padding:6px 10px}
 .cal-field{display:grid;gap:6px;font-weight:600}.cal-field textarea,.cal-field input{font-weight:400}.cal-checkbox{display:flex;align-items:center;font-weight:400;margin-left:auto}.cal-checkbox input{width:auto;order:-1}
 .cal-block{border:1px solid var(--line);border-radius:9px;margin:16px 0;padding:16px;background:white}.cal-block-toolbar{margin-bottom:12px}.cal-block-toolbar strong{margin-right:auto}.cal-block-toolbar button{font-size:12px;padding:5px 9px}

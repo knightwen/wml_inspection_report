@@ -20,6 +20,13 @@ assert.deepEqual(parseTable('A\tB\r\n"line 1\nline 2"\t"quote ""two"""\r\n'),[['
  assert.equal(await page.locator('#meta_site').inputValue(),'');assert.equal(await page.locator('#calTree .cal-tree-row').count(),9);
  const styleCalls=[];page.on('request',r=>{if(/\/api\/(generate|preview|save)(\?|$)/.test(r.url()))styleCalls.push(r.url());});
  await page.locator('#templatePreview').click();await page.locator('#templatePreviewDialog[open]').waitFor();assert.equal(styleCalls.length,0);assert.equal(await page.locator('#templatePreviewPages .template-sheet').count(),3);await page.screenshot({path:path.join(qa,'calculation-template-preview.png')});await page.locator('#closeTemplatePreview').click();
+ assert(await page.locator('#calCoverPanel').getAttribute('open')!==null);
+ await page.locator('#calCoverReportTitle').fill('CUSTOM CAL REPORT');
+ await page.locator('#calCoverIntroductionTitle').fill('PROJECT BRIEF');
+ await page.locator('#calCoverMaterialsTitle').fill('DESIGN INPUTS');
+ await page.locator('#calCoverIntroduction').fill('Cover content can be edited.');
+ await page.locator('#calCoverMaterials').fill('Materials supplied by the designer.');await saved(page);
+ await page.locator('#templatePreview').click();assert.equal(await page.locator('.template-sheet-header strong').first().textContent(),'CUSTOM CAL REPORT');assert((await page.locator('#templatePreviewPages').textContent()).includes('PROJECT BRIEF'));await page.locator('#closeTemplatePreview').click();
  // Chapter operations apply only to this report, including nested numbering.
  await page.locator('#addCalModule').click();await page.locator('#calModuleTitle').fill('Additional chapter');await page.getByRole('button',{name:'＋ 子章节',exact:true}).click();await page.locator('#calModuleTitle').fill('Supplement');
  assert((await page.locator('#calTree').textContent()).includes('5.1  Supplement'));
@@ -43,6 +50,8 @@ assert.deepEqual(parseTable('A\tB\r\n"line 1\nline 2"\t"quote ""two"""\r\n'),[['
  await page.locator('#templateSelect').selectOption('inspection');await saved(page);assert.equal(await page.locator('#meta_site').inputValue(),'Inspection survives switching');
  await page.locator('#templateSelect').selectOption('calculation');await saved(page);assert.equal(await page.locator('#projectSelect').inputValue(),current);assert.equal(await page.getByLabel('章节文字',{exact:true}).inputValue(),'External calculation report content');
  await page.reload();await saved(page);assert.equal(await page.locator('#calModuleTitle').inputValue(),'Project References');
+ assert.equal(await page.locator('#calCoverReportTitle').inputValue(),'CUSTOM CAL REPORT');assert.equal(await page.locator('#calCoverIntroduction').inputValue(),'Cover content can be edited.');
+ await page.locator('#calCoverTitle').click();await page.getByRole('button',{name:'封面与报告标题',exact:true}).click();assert(await page.locator('#calCoverPanel').getAttribute('open')!==null);
  await page.screenshot({path:path.join(qa,'calculation-workbench.png'),fullPage:true});
  for(const format of ['xlsx','docx']){await page.locator('#calExportFormat').selectOption(format);const download=page.waitForEvent('download');await page.locator('#calExport').click();const file=await download;await file.saveAs(path.join(qa,'browser-calculation.'+format));if(await page.locator('#reportPreviewDialog').getAttribute('open')!==null)await page.locator('#closeReportPreview').click();}
  // Saving during a preview leaves the submitted Excel and Word snapshot unchanged.
@@ -53,9 +62,10 @@ assert.deepEqual(parseTable('A\tB\r\n"line 1\nline 2"\t"quote ""two"""\r\n'),[['
  await page.getByLabel('章节文字',{exact:true}).fill('Unsaved content stays in CAL');await page.locator('#templateSelect').selectOption('inspection');await page.waitForTimeout(300);assert.equal(await page.locator('#templateSelect').inputValue(),'calculation');assert.equal(await page.getByLabel('章节文字',{exact:true}).inputValue(),'Unsaved content stays in CAL');
  await page.unroute('**/api/save');failed.length=0;await page.locator('#retrySave').click();await saved(page);
  // Fresh CAL drafts have no content or customised chapter titles.
- await page.locator('#newProject').click();await saved(page);assert.equal(await page.locator('#calModuleTitle').inputValue(),'References');assert.equal(await page.locator('.cal-block').count(),0);
+ await page.locator('#newProject').click();await saved(page);assert.equal(await page.locator('#calModuleTitle').inputValue(),'References');assert.equal(await page.locator('.cal-block').count(),0);assert.equal(await page.locator('#calCoverReportTitle').inputValue(),'CALCULATION REPORT');
  await page.locator('#projectSelect').selectOption(current);await saved(page);
  const backup=page.waitForEvent('download');await page.locator('#backupButton').click();const backupFile=await backup;const backupPath=path.join(qa,'browser-calculation.inspection.zip');await backupFile.saveAs(backupPath);await page.locator('#restoreFile').setInputFiles(backupPath);await saved(page);assert.equal(await page.locator('#calModuleTitle').inputValue(),'Project References');assert.equal(await page.locator('.cal-content-image').count(),1);
+ assert.equal(await page.locator('#calCoverReportTitle').inputValue(),'CUSTOM CAL REPORT');
  await page.locator('#languageSelect').selectOption('en');await page.waitForFunction(()=>document.documentElement.lang==='en-AU');await page.locator('#calEditor').getByRole('button',{name:'+ Text',exact:true}).waitFor();
  assert.deepEqual(errors,[]);assert.deepEqual(failed,[]);
  console.log('CAL browser flow passed: template switching, empty defaults, instant preview, content/table/images, persistence, exports, save protection, backup restore and English UI.');

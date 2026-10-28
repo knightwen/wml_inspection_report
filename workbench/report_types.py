@@ -104,6 +104,8 @@ def validate_calculation(project, catalog):
         raise ValueError('封面格式不正确 / Invalid cover')
     for key in ['introduction', 'materials']:
         string(cover.get(key, ''), 60000)
+    for key in ['title','introduction_title','materials_title']:
+        if key in cover:string(cover[key],120)
     revisions = cover.get('revisions')
     if not isinstance(revisions, list) or len(revisions) > 100:
         raise ValueError('修订记录格式不正确 / Invalid revision history')

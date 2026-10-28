@@ -90,15 +90,51 @@ class CalculationTests(unittest.TestCase):
         cells=[c for s in book for row in s for c in row if c.value is not None]
         self.assertTrue(any(c.value=='=1+1' and c.data_type=='s' for c in cells))
         self.assertFalse(any(c.data_type=='f' for c in cells))
-        self.assertEqual(book['Report'].print_title_rows,'$1:$5')
+        self.assertEqual(book['Report'].print_title_rows,'$1:$9')
         self.assertEqual(book['_Outline'].sheet_state,'veryHidden')
-        self.assertEqual(len(book['Report']._images),1)
+        self.assertEqual(len(book['Report']._images),2)
+        for name in ['Cover','Contents','Report']:
+            self.assertEqual(book[name]['F1'].value,'CALCULATION REPORT')
+            self.assertEqual(book[name].sheet_view.view,'normal')
+            self.assertTrue(book[name]._images)
         with zipfile.ZipFile(path) as z:
             self.assertFalse(any('vba' in n.lower() for n in z.namelist()))
-            self.assertIn('xl/media/wml-header.png',z.namelist())
+            self.assertTrue(any(n.startswith('xl/media/') for n in z.namelist()))
             all_xml=b''.join(z.read(n) for n in z.namelist() if n.endswith('.xml'))
             self.assertNotIn(b'Magnet Support',all_xml)
-            for i in range(1,4):self.assertIn(b'legacyDrawingHF',z.read(f'xl/worksheets/sheet{i}.xml'))
+            for i in range(1,4):self.assertIn(b'CALCULATION REPORT',z.read(f'xl/worksheets/sheet{i}.xml'))
+
+    def test_custom_cover_titles_content_and_borders_survive_exports_and_backup(self):
+        self.content()
+        self.project['cal_cover'].update(title='DESIGN & CALCULATION REPORT',introduction_title='PURPOSE',materials_title='DESIGN MATERIALS',introduction='Editable cover introduction',materials='Editable material notes',revisions=[{'revision':'B','date':'28/10/2026','status':'Review','designed':'QA','checked':'QC','approved':'AP'}])
+        saved=self.store.save(self.project)
+        restored=self.store.restore(self.store.backup(saved['id']))
+        self.assertEqual(restored['cal_cover'],saved['cal_cover'])
+        result=self.store.export_snapshot(restored,'xlsx')
+        book=load_workbook(self.store.path/'exports'/(result['id']+'.xlsx'))
+        for name in ['Cover','Contents','Report']:
+            self.assertEqual(book[name]['F1'].value,'DESIGN & CALCULATION REPORT')
+            self.assertEqual([getattr(book[name]['A5'].border,edge).style for edge in ['left','right','top','bottom']],['thin']*4)
+        cover_values=[c.value for row in book['Cover'] for c in row]
+        for text in ['PURPOSE','DESIGN MATERIALS','Editable cover introduction','Editable material notes','Review']:
+            self.assertIn(text,cover_values)
+        cells=[c for row in book['Report'] for c in row if c.value=='=1+1']
+        self.assertEqual(len(cells),1)
+        self.assertEqual([getattr(cells[0].border,edge).style for edge in ['left','right','top','bottom']],['thin']*4)
+        revision=next(c for row in book['Cover'] for c in row if c.value=='REVISION')
+        self.assertEqual([getattr(revision.border,edge).style for edge in ['left','right','top','bottom']],['thin']*4)
+        result=self.store.export_snapshot(restored,'docx')
+        with zipfile.ZipFile(self.store.path/'exports'/(result['id']+'.docx')) as z:
+            self.assertIn('DESIGN & CALCULATION REPORT',''.join(E.fromstring(z.read('word/header1.xml')).itertext()))
+            for text in ['PURPOSE','DESIGN MATERIALS','Editable cover introduction']:
+                self.assertIn(text,''.join(E.fromstring(z.read('word/document.xml')).itertext()))
+
+    def test_legacy_cover_without_title_keeps_default_branding(self):
+        for key in ['title','introduction_title','materials_title']:self.project['cal_cover'].pop(key)
+        self.store.save(self.project)
+        result=self.store.export_snapshot(self.project,'xlsx')
+        book=load_workbook(self.store.path/'exports'/(result['id']+'.xlsx'))
+        self.assertEqual(book['Cover']['F1'].value,'CALCULATION REPORT')
 
     def test_docx_content_and_repeated_header(self):
         self.content();result=self.store.export_snapshot(self.project,'docx')

@@ -1,4 +1,4 @@
-param([string]$Path, [string]$OwnerPath, [string]$LogoPath)
+param([string]$Path, [string]$OwnerPath)
 $ErrorActionPreference = 'Stop'
 $excel = $null
 $book = $null
@@ -20,14 +20,8 @@ try {
     $excel.AskToUpdateLinks = $false
     $file = (Resolve-Path -LiteralPath $Path).Path
     $book = $excel.Workbooks.Open($file, 0, $false)
-    # Header images repeat on every page, including long modules.
-    foreach ($name in @('Cover','Contents','Report')) {
-        $sheet = $book.Worksheets.Item($name)
-        $sheet.PageSetup.LeftHeaderPicture.Filename = (Resolve-Path -LiteralPath $LogoPath).Path
-        $sheet.PageSetup.LeftHeaderPicture.Height = 44
-        $sheet.PageSetup.LeftHeaderPicture.Width = 42
-        $sheet.PageSetup.LeftHeader = '&G'
-    }
+    # The fixed worksheet header, including its logo, repeats via print titles
+    # and remains visible in normal Excel view; do not add a second print header.
     $report = $book.Worksheets.Item('Report')
     $contents = $book.Worksheets.Item('Contents')
     $outline = $book.Worksheets.Item('_Outline')

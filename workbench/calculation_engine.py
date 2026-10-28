@@ -3,15 +3,13 @@
 The source workbook supplies the logo, green rule, A4 portrait geometry, and
 project-information band. No historical project content or macros are shipped.
 """
-from pathlib import Path
 import math
-import zipfile
-from lxml import etree as E
 from PIL import Image as PILImage
 from report_types import walk_modules
 
 GREEN = '92D050'
 INK = '263B34'
+CONTENT_ROW = 11
 FIELDS = [('Project', 'site'), ('Job No.', 'project_number'), ('Location', 'location'),
           ('Rev.', 'revision'), ('Calc. No.', 'report_number'), ('Date', 'report_date'), ('Subject', 'subject')]
 
@@ -43,7 +41,13 @@ def generate_xlsx(project, photo_path, resources, target):
     book = Workbook()
     book.remove(book.active)
     meta = project['metadata']
-    thin = Side(style='thin', color='CAD2CC')
+    thin = Side(style='thin', color='59635D')
+
+    def outline(sheet, row, start, end):
+        # Border the logical merged cell, not its individual backing columns.
+        for col in range(start,end+1):
+            sheet.cell(row,col).border=Border(top=thin,bottom=thin,
+                left=thin if col==start else Side(),right=thin if col==end else Side())
 
     def value(sheet, row, col, text):
         cell = sheet.cell(row, col, str(text or ''))
@@ -52,32 +56,43 @@ def generate_xlsx(project, photo_path, resources, target):
         cell.alignment = Alignment(vertical='top', wrap_text=True)
         return cell
 
-    def merged(sheet, row, start, end, text, bold=False, size=10):
+    def merged(sheet, row, start, end, text, bold=False, size=10, bordered=False):
         sheet.merge_cells(start_row=row, start_column=start, end_row=row, end_column=end)
         cell = value(sheet, row, start, text)
         cell.font = Font(name='Arial', size=size, bold=bold, color=INK)
+        if bordered:outline(sheet,row,start,end)
         return cell
 
     def sheet(name):
         ws = book.create_sheet(name)
         ws.sheet_view.showGridLines = False
+        ws.sheet_view.view = 'normal'
         for col in range(1, 21):
             ws.column_dimensions[get_column_letter(col)].width = 4.7
-        for row, pair in enumerate([FIELDS[:2], FIELDS[2:4], FIELDS[4:6]], 1):
+        # Keep branding in worksheet cells/drawings so it is visible and editable
+        # in normal Excel view. Excel also repeats these drawings with print titles.
+        logo=Image(str(resources/'wml-logo.png'));logo.width=56;logo.height=59
+        ws.add_image(logo,'A1')
+        ws.merge_cells('F1:T3')
+        title=value(ws,1,6,project['cal_cover'].get('title','CALCULATION REPORT'))
+        title.font=Font(name='Arial',size=16,bold=True,color=INK)
+        title.alignment=Alignment(horizontal='right',vertical='center',wrap_text=True)
+        band=max(54,len(_lines(str(title.value or ''),55))*20+6)
+        for row in range(1,4):ws.row_dimensions[row].height=band/3
+        for col in range(1,21):ws.cell(4,col).fill=PatternFill('solid',fgColor=GREEN)
+        ws.row_dimensions[4].height=6
+        for row, pair in enumerate([FIELDS[:2], FIELDS[2:4], FIELDS[4:6]], 5):
             heights=[]
             for (label, key), col in zip(pair, [1, 11]):
-                merged(ws, row, col, col+2, label, True)
-                merged(ws, row, col+3, col+9, meta.get(key, ''))
+                merged(ws, row, col, col+2, label, True, bordered=True)
+                merged(ws, row, col+3, col+9, meta.get(key, ''), bordered=True)
                 heights.append(len(_lines(meta.get(key,''),40))*15+5)
-                for column in range(col,col+10):ws.cell(row,column).border=Border(bottom=thin)
-            ws.row_dimensions[row].height = max(30 if row == 1 else 22,*heights)
-        merged(ws, 4, 1, 3, 'Subject', True)
-        merged(ws, 4, 4, 20, meta.get('subject', ''))
-        ws.row_dimensions[4].height = max(22, len(_lines(meta.get('subject', ''), 100))*15)
-        for col in range(1, 21):
-            ws.cell(5, col).fill = PatternFill('solid', fgColor=GREEN)
-        ws.row_dimensions[5].height = 6
-        ws.print_title_rows = '1:5'
+            ws.row_dimensions[row].height = max(30 if row == 5 else 22,*heights)
+        merged(ws, 8, 1, 3, 'Subject', True, bordered=True)
+        merged(ws, 8, 4, 20, meta.get('subject', ''), bordered=True)
+        ws.row_dimensions[8].height = max(22, len(_lines(meta.get('subject', ''), 100))*15)
+        ws.row_dimensions[9].height=8
+        ws.print_title_rows = '1:9'
         ws.page_setup.orientation = 'portrait'
         ws.page_setup.paperSize = ws.PAPERSIZE_A4
         ws.page_setup.fitToWidth = 1
@@ -85,16 +100,12 @@ def generate_xlsx(project, photo_path, resources, target):
         ws.sheet_properties.pageSetUpPr.fitToPage = True
         ws.page_margins.left = 0.945
         ws.page_margins.right = 0.433
-        ws.page_margins.top = 1.0
+        ws.page_margins.top = 0.433
         ws.page_margins.bottom = 0.5
         ws.page_margins.header = 0.2
         ws.page_margins.footer = 0.2
-        ws.oddHeader.left.text = '&G'
-        ws.oddHeader.right.text = 'CALCULATION REPORT'
-        ws.oddHeader.right.font = 'Arial,Bold'
-        ws.oddHeader.right.size = 16
         ws.oddFooter.right.text = 'Page &P of &N'
-        ws.freeze_panes = 'A6'
+        ws.freeze_panes = 'A10'
         return ws
 
     def text(ws, row, content):
@@ -105,12 +116,13 @@ def generate_xlsx(project, photo_path, resources, target):
         return row + 1
 
     cover = sheet('Cover')
-    row = 8
+    row = CONTENT_ROW
     if meta.get('client'):
         merged(cover,row,1,20,'CLIENT',True,11)
         row=text(cover,row+1,meta['client'])+1
-    for title, key in [('INTRODUCTION', 'introduction'), ('MATERIAL PROPERTIES', 'materials')]:
+    for title, key in [(project['cal_cover'].get('introduction_title','INTRODUCTION'), 'introduction'), (project['cal_cover'].get('materials_title','MATERIAL PROPERTIES'), 'materials')]:
         merged(cover, row, 1, 20, title, True, 11)
+        cover.row_dimensions[row].height=max(20,len(_lines(title,95))*16+4)
         row = text(cover, row+2, project['cal_cover'].get(key, '')) + 2
     for label, key, prefix in [('PREPARED BY', 'prepared_by', 'author'), ('REVIEWED BY', 'reviewed_by', 'reviewer')]:
         merged(cover, row, 1, 6, label, True)
@@ -119,21 +131,21 @@ def generate_xlsx(project, photo_path, resources, target):
     headers = ['REVISION', 'DATE', 'STATUS', 'DESIGNED', 'CHECKED', 'APPROVED']
     spans = [(1, 2), (3, 5), (6, 11), (12, 14), (15, 17), (18, 20)]
     for title, (start, end) in zip(headers, spans):
-        merged(cover, row, start, end, title, True, 8)
+        merged(cover, row, start, end, title, True, 8, bordered=True)
     for revision in project['cal_cover']['revisions'] or [{}]:
         row += 1
         for key, (start, end) in zip(['revision','date','status','designed','checked','approved'], spans):
-            merged(cover, row, start, end, revision.get(key, ''))
+            merged(cover, row, start, end, revision.get(key, ''), bordered=True)
         cover.row_dimensions[row].height = 28
     cover.print_area = f'A1:T{max(35, row+2)}'
 
     contents = sheet('Contents')
-    merged(contents, 7, 1, 20, 'CONTENTS', True, 14)
+    merged(contents, CONTENT_ROW, 1, 20, 'CONTENTS', True, 14)
     report = sheet('Report')
-    row = 7
+    row = CONTENT_ROW
     headings = []
-    for index, (number, module) in enumerate(walk_modules(project['modules']), 9):
-        if module['page_break'] and row > 7:
+    for index, (number, module) in enumerate(walk_modules(project['modules']), CONTENT_ROW+2):
+        if module['page_break'] and row > CONTENT_ROW:
             report.row_breaks.append(Break(id=row-1))
         title = number + '  ' + module['title']
         merged(report, row, 1, 20, title, True, 12 if '.' not in number else 11)
@@ -158,9 +170,8 @@ def generate_xlsx(project, photo_path, resources, target):
                             start=math.floor(ci*20/columns)+1
                             end=math.floor((ci+1)*20/columns)
                             chunk=cell_lines[offset:offset+15]
-                            cell=merged(report,row,start,end,'\n'.join(chunk),ri==0)
+                            cell=merged(report,row,start,end,'\n'.join(chunk),ri==0,bordered=True)
                             if ri==0:cell.fill=PatternFill('solid',fgColor='E9EFDF')
-                            for c in range(start,end+1):report.cell(row,c).border=Border(bottom=thin)
                             height=max(height,len(chunk)*15+6)
                         report.row_dimensions[row].height=height
                         row+=1
@@ -183,48 +194,15 @@ def generate_xlsx(project, photo_path, resources, target):
         row += 1
     if not headings:
         merged(report, row, 1, 20, '')
-    contents.print_area = f'A1:T{max(12, 9+len(headings))}'
-    report.print_area = f'A1:T{max(8,row)}'
+    contents.print_area = f'A1:T{max(CONTENT_ROW+4, CONTENT_ROW+2+len(headings))}'
+    report.print_area = f'A1:T{max(CONTENT_ROW+1,row)}'
     outline = book.create_sheet('_Outline')
     outline.append(['Report row', 'Contents row', 'Title'])
     for h in headings:
         outline.append([h['row'], h['contents_row'], h['title']])
     outline.sheet_state = 'veryHidden'
     book.save(target)
-    _header_logos(target, resources/'wml-logo.png', 3)
 
-
-def _header_logos(target, logo, count):
-    """Add native Excel header pictures, which repeat on every printed page."""
-    s = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
-    r = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
-    p = 'http://schemas.openxmlformats.org/package/2006/relationships'
-    ct = 'http://schemas.openxmlformats.org/package/2006/content-types'
-    with zipfile.ZipFile(target) as z:
-        parts = {n:z.read(n) for n in z.namelist()}
-    parts['xl/media/wml-header.png'] = logo.read_bytes()
-    types = E.fromstring(parts['[Content_Types].xml'])
-    for ext, kind in [('vml','application/vnd.openxmlformats-officedocument.vmlDrawing'), ('png','image/png')]:
-        if not any(n.get('Extension') == ext for n in types):
-            E.SubElement(types, '{'+ct+'}Default', Extension=ext, ContentType=kind)
-    parts['[Content_Types].xml'] = E.tostring(types)
-    for index in range(1, count+1):
-        file = f'xl/worksheets/sheet{index}.xml'
-        relfile = f'xl/worksheets/_rels/sheet{index}.xml.rels'
-        rels = E.fromstring(parts[relfile]) if relfile in parts else E.Element('{'+p+'}Relationships', nsmap={None:p})
-        rid = 'rIdWmlHeader'
-        E.SubElement(rels, '{'+p+'}Relationship', Id=rid, Type=r+'/vmlDrawing', Target=f'../drawings/header{index}.vml')
-        parts[relfile] = E.tostring(rels)
-        root = E.fromstring(parts[file])
-        E.SubElement(root, '{'+s+'}legacyDrawingHF', {'{'+r+'}id':rid})
-        parts[file] = E.tostring(root)
-        parts[f'xl/drawings/header{index}.vml'] = b'''<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office"><o:shapelayout v:ext="edit"><o:idmap v:ext="edit" data="1"/></o:shapelayout><v:shapetype id="_x0000_t75" coordsize="21600,21600" o:spt="75" o:preferrelative="t" path="m@4@5l@4@11@9@11@9@5xe" filled="f" stroked="f"><v:stroke joinstyle="miter"/><v:formulas><v:f eqn="if lineDrawn pixelLineWidth 0"/><v:f eqn="sum @0 1 0"/><v:f eqn="sum 0 0 @1"/><v:f eqn="prod @2 1 2"/><v:f eqn="prod @3 21600 pixelWidth"/><v:f eqn="prod @3 21600 pixelHeight"/><v:f eqn="sum @0 0 1"/><v:f eqn="prod @6 1 2"/><v:f eqn="prod @7 21600 pixelWidth"/><v:f eqn="sum @8 21600 0"/><v:f eqn="prod @7 21600 pixelHeight"/><v:f eqn="sum @10 21600 0"/></v:formulas><v:path o:extrusionok="f" gradientshapeok="t" o:connecttype="rect"/><o:lock v:ext="edit" aspectratio="t"/></v:shapetype><v:shape id="LH" o:spid="_x0000_s1025" type="#_x0000_t75" style="position:absolute;margin-left:0;margin-top:0;width:42pt;height:44pt;z-index:1"><v:imagedata o:relid="rId1" o:title="WML"/><o:lock v:ext="edit" rotation="t"/></v:shape></xml>'''
-        links = E.Element('{'+p+'}Relationships', nsmap={None:p})
-        E.SubElement(links, '{'+p+'}Relationship', Id='rId1', Type=r+'/image', Target='../media/wml-header.png')
-        parts[f'xl/drawings/_rels/header{index}.vml.rels'] = E.tostring(links)
-    with zipfile.ZipFile(target, 'w', zipfile.ZIP_DEFLATED) as z:
-        for name, data in parts.items():
-            z.writestr(name, data)
 
 
 def generate_docx(project, photo_path, resources, target):
@@ -248,7 +226,7 @@ def generate_docx(project, photo_path, resources, target):
     table.cell(0,0).paragraphs[0].add_run().add_picture(str(resources/'wml-logo.png'), width=Inches(.55))
     title = table.cell(0,1).paragraphs[0]
     title.alignment = 2
-    run = title.add_run('CALCULATION REPORT');run.bold=True;run.font.size=Pt(16)
+    run = title.add_run(project['cal_cover'].get('title','CALCULATION REPORT'));run.bold=True;run.font.size=Pt(16)
     meta = project['metadata']
     info = header.add_table(rows=0, cols=4, width=Inches(6.89))
     info.style = 'Table Grid'
@@ -262,7 +240,7 @@ def generate_docx(project, photo_path, resources, target):
     for k,v in [('val','single'),('sz','16'),('color',GREEN)]:bottom.set(qn('w:'+k),v)
     borders.append(bottom);p._p.get_or_add_pPr().append(borders)
     if meta.get('client'):document.add_paragraph('CLIENT: '+meta['client'])
-    for title,key in [('INTRODUCTION','introduction'),('MATERIAL PROPERTIES','materials')]:
+    for title,key in [(project['cal_cover'].get('introduction_title','INTRODUCTION'),'introduction'),(project['cal_cover'].get('materials_title','MATERIAL PROPERTIES'),'materials')]:
         heading=document.add_paragraph();run=heading.add_run(title);run.bold=True;run.font.size=Pt(11)
         document.add_paragraph(project['cal_cover'].get(key,''))
     for label,key,prefix in [('PREPARED BY','prepared_by','author'),('REVIEWED BY','reviewed_by','reviewer')]:

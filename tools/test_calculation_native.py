@@ -11,6 +11,7 @@ def main():
     folder=Path(__file__).resolve().parents[1]/'.build/qa/calculation-native'
     store=Store(folder)
     project=store.new('calculation')
+    project['cal_cover'].update(title='STRUCTURAL DESIGN REPORT',introduction_title='PROJECT OVERVIEW',introduction='Editable cover content verified in Excel and PDF.')
     project['metadata'].update(site='CAL WORKBENCH QA',project_number='QA',report_number='QA-CAL-001',location='Test location',subject='Printable report integration',report_date='2026-10-28',prepared_by='QA Author')
     text='External analysis output. This workbook compiles the report and does not execute engineering calculations. '
     project['modules'][0]['blocks']=[{'id':secrets.token_hex(16),'type':'text','text':text*100}, {'id':secrets.token_hex(16),'type':'table','rows':[['Case','Result'],['=1+1','Text only'],['QA','OK']]}]
@@ -30,10 +31,14 @@ def main():
         for page in doc:
             tp=page.get_textpage();texts.append(tp.get_text_range());tp.close();page.close()
     assert pages>=4,(pages,texts)
-    assert all('CALCULATION REPORT' in t and 'QA-CAL-001' in t for t in texts),texts
+    assert all('STRUCTURAL DESIGN REPORT' in t and 'QA-CAL-001' in t for t in texts),texts
+    assert 'PROJECT OVERVIEW' in texts[0] and 'Editable cover content' in texts[0]
+    with pdfium.PdfDocument(str(pdf)) as doc:
+        assert all(any(obj.type==3 for obj in page.get_objects()) for page in doc),'Missing repeated worksheet logo'
     assert '=1+1' in '\n'.join(texts)
     from openpyxl import load_workbook
     book=load_workbook(source,read_only=True,data_only=True)
+    assert book['Cover']['F1'].value=='STRUCTURAL DESIGN REPORT'
     normal=lambda text:re.sub(r'\s+','',str(text)).casefold()
     for _,contents_row,title in list(book['_Outline'].values)[1:]:
         actual=next(i+1 for i,text in enumerate(texts[2:],2) if normal(title) in {normal(line) for line in text.splitlines()})

@@ -76,7 +76,7 @@ def convert_word_pdf(source,resources,cancel,timeout=120):
 
 def convert_excel_pdf(source,resources,cancel,timeout=120):
     owner=source.with_suffix('.excel-owner.json')
-    command=['powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',str(resources/'preview_calculation.ps1'),str(source.resolve()),str(owner.resolve()),str((resources/'wml-logo.png').resolve())]
+    command=['powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',str(resources/'preview_calculation.ps1'),str(source.resolve()),str(owner.resolve())]
     process=subprocess.Popen(command,stdout=subprocess.PIPE,stderr=subprocess.PIPE,creationflags=subprocess.CREATE_NO_WINDOW)
     started=time.monotonic()
     try:

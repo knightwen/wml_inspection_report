@@ -21,6 +21,14 @@ numbers are checked against the actual printed PDF. Word export contains the
 same editable report content; its pagination may differ. Update its contents
 field after opening in Word.
 
+The cover editor opens expanded and is also available through **Cover and report
+title** in the chapter navigation. Edit the report title, introduction and
+material headings/text, and revision history there. These changes are saved with
+the current draft and used in all output formats. The Excel logo and title now
+live in the worksheet header band, so they are visible in normal view and repeat
+with the print-title rows. Project information, content tables and revision
+history have explicit borders around each logical cell.
+
 These additions are available in the source/development version and have not
 been published as a new portable release.
 
