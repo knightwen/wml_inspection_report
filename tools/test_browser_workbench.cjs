@@ -24,11 +24,11 @@ async function seedItem(page,text,fixture){
  assert.equal(await page.locator('html').getAttribute('lang'),'zh-CN');
  await page.locator('#meta_site').fill('Browser Regression');await page.locator('#meta_report_number').fill('QA-BROWSER');await page.locator('#meta_project_number').fill('QA');await saved(page);
 
- for(const key of ['introduction','remedial_works','conclusion','cost_estimate'])await page.locator('#section_'+key).fill(key+' paragraph one.\n\nSecond paragraph.');
+ for(const [index,key] of [[0,'introduction'],[2,'remedial_works'],[3,'conclusion'],[4,'cost_estimate']]){await page.locator('#inspectionTree > button').nth(index).click();await page.locator('#section_'+key).fill(key+' paragraph one.\n\nSecond paragraph.');}
  await page.locator('#saveSections').click();await saved(page);await page.reload();await page.waitForFunction(()=>document.querySelector('#section_introduction')?.value==='introduction paragraph one.\n\nSecond paragraph.');await saved(page);
  for(const key of ['introduction','remedial_works','conclusion','cost_estimate'])assert.equal(await page.locator('#section_'+key).inputValue(),key+' paragraph one.\n\nSecond paragraph.');
 
- await page.locator('#addCostRow').click();for(const [key,value] of Object.entries({description:'Cost browser test',quantity:'3',unit:'each',rate:'0.335'}))await page.getByLabel('费用项 1 '+key,{exact:true}).fill(value);await page.getByLabel('费用项 1 priority',{exact:true}).selectOption('High');assert((await page.locator('#costTotal').textContent()).includes('1.01'));await page.locator('#saveSections').click();await saved(page);await page.reload();await page.waitForFunction(()=>document.querySelector('#costTotal')?.textContent.includes('1.01'));assert.equal(await page.getByLabel('费用项 1 description',{exact:true}).inputValue(),'Cost browser test');
+ await page.locator('#inspectionTree > button').nth(4).click();await page.locator('#addCostRow').click();for(const [key,value] of Object.entries({description:'Cost browser test',quantity:'3',unit:'each',rate:'0.335'}))await page.getByLabel('费用项 1 '+({description:'说明',quantity:'数量',unit:'单位',rate:'单价'}[key]),{exact:true}).fill(value);await page.getByLabel('费用项 1 优先级',{exact:true}).selectOption('High');assert((await page.locator('#costTotal').textContent()).includes('1.01'));await page.locator('#saveSections').click();await saved(page);await page.reload();await page.waitForFunction(()=>document.querySelector('#costTotal')?.textContent.includes('1.01'));assert.equal(await page.getByLabel('费用项 1 说明',{exact:true}).inputValue(),'Cost browser test');
  await page.locator('#managePersonnel').click();await page.locator('#personnel_qualifications').fill('Old qualification');await page.locator('#personnel_title').fill('Old title');await page.locator('#savePersonnel').click();await page.locator('#closePersonnel').click();
  const person=await page.locator('#meta_prepared_by option').nth(1).getAttribute('value');await page.locator('#meta_prepared_by').selectOption(person);assert((await page.locator('#details_prepared_by').textContent()).includes('Old qualification'));
  await page.locator('#meta_prepared_by').selectOption('__manual__');await page.locator('#manual_prepared_by').fill('Manual Browser Author');assert(await page.locator('#details_prepared_by').isHidden());await saved(page);
@@ -45,7 +45,7 @@ async function seedItem(page,text,fixture){
  await page.locator('.subitem-select').nth(1).click();assert.equal(await page.locator('#observationText').inputValue(),'SECOND SUBITEM browser condition');
  await page.locator('#saveItem').click();await page.locator('#savedItems .saved-item').first().waitFor();await saved(page);assert.equal(await page.locator('#savedItems .saved-subitem').count(),2);
  await seedItem(page,'SECOND browser condition',fixture);await page.locator('#saveItem').click();await saved(page);
- await page.locator('#reportSections summary').click();await page.locator('#savedItems').scrollIntoViewIfNeeded();
+ await page.locator('#inspectionTree > button').nth(1).click();await page.locator('#savedItems').scrollIntoViewIfNeeded();
  const handles=page.locator('#savedItems .item-drag-handle');assert.equal(await handles.count(),2);
  const order=await page.locator('#savedItems .saved-item').evaluateAll(rows=>rows.map(row=>row.dataset.itemId));
  const a=await handles.nth(0).boundingBox(),b=await page.locator('#savedItems .saved-item').nth(1).boundingBox();

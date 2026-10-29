@@ -94,7 +94,7 @@ class CalculationTests(unittest.TestCase):
         self.assertEqual(book['_Outline'].sheet_state,'veryHidden')
         self.assertEqual(len(book['Report']._images),2)
         for name in ['Cover','Contents','Report']:
-            self.assertEqual(book[name]['F1'].value,'CALCULATION REPORT')
+            self.assertEqual(book[name]['K1'].value,'CALCULATION REPORT')
             self.assertEqual(book[name].sheet_view.view,'normal')
             self.assertTrue(book[name]._images)
         with zipfile.ZipFile(path) as z:
@@ -106,6 +106,7 @@ class CalculationTests(unittest.TestCase):
 
     def test_custom_cover_titles_content_and_borders_survive_exports_and_backup(self):
         self.content()
+        self.project['cal_cover'].pop('modules')  # Legacy text-only cover remains supported.
         self.project['cal_cover'].update(title='DESIGN & CALCULATION REPORT',introduction_title='PURPOSE',materials_title='DESIGN MATERIALS',introduction='Editable cover introduction',materials='Editable material notes',revisions=[{'revision':'B','date':'28/10/2026','status':'Review','designed':'QA','checked':'QC','approved':'AP'}])
         saved=self.store.save(self.project)
         restored=self.store.restore(self.store.backup(saved['id']))
@@ -113,8 +114,8 @@ class CalculationTests(unittest.TestCase):
         result=self.store.export_snapshot(restored,'xlsx')
         book=load_workbook(self.store.path/'exports'/(result['id']+'.xlsx'))
         for name in ['Cover','Contents','Report']:
-            self.assertEqual(book[name]['F1'].value,'DESIGN & CALCULATION REPORT')
-            self.assertEqual([getattr(book[name]['A5'].border,edge).style for edge in ['left','right','top','bottom']],['thin']*4)
+            self.assertEqual(book[name]['K1'].value,'DESIGN & CALCULATION REPORT')
+            self.assertEqual([getattr(book[name]['A5'].border,edge).style for edge in ['bottom']],['thin'])
         cover_values=[c.value for row in book['Cover'] for c in row]
         for text in ['PURPOSE','DESIGN MATERIALS','Editable cover introduction','Editable material notes','Review']:
             self.assertIn(text,cover_values)
@@ -134,7 +135,7 @@ class CalculationTests(unittest.TestCase):
         self.store.save(self.project)
         result=self.store.export_snapshot(self.project,'xlsx')
         book=load_workbook(self.store.path/'exports'/(result['id']+'.xlsx'))
-        self.assertEqual(book['Cover']['F1'].value,'CALCULATION REPORT')
+        self.assertEqual(book['Cover']['K1'].value,'CALCULATION REPORT')
 
     def test_docx_content_and_repeated_header(self):
         self.content();result=self.store.export_snapshot(self.project,'docx')

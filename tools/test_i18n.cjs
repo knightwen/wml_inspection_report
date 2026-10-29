@@ -8,7 +8,7 @@ function load(search,saved,englishOnly=false){
  const placeholder={value:'用户手动输入内容',attributes:{'data-i18n-placeholder':'照片名称（可留空）'},getAttribute(k){return this.attributes[k];},setAttribute(k,v){this.attributes[k]=v;}};
  const document={documentElement:{},querySelectorAll(selector){return selector==='[data-i18n]'?[title]:selector==='[data-i18n-tail]'?[role]:selector==='[data-i18n-placeholder]'?[placeholder]:[];}};
  const context={WorkbenchInterface:{englishOnly},URLSearchParams,location:{search},localStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v)},document};context.window=context;
- vm.createContext(context);for(const file of ['translations-en.js','i18n.js'])vm.runInContext(fs.readFileSync(path.join(web,file),'utf8'),context);
+ vm.createContext(context);for(const file of ['translations-en.js','translations-zh.js','i18n.js'])vm.runInContext(fs.readFileSync(path.join(web,file),'utf8'),context);
  return {ui:context.WorkbenchI18n,title,role,placeholder,document,storage};
 }
 const en=load('?lang=en','zh');en.ui.apply();
@@ -25,5 +25,6 @@ assert.equal(load('?lang=zh','zh',true).ui.language,'en');
 assert.equal(load('?lang=zh','zh',true).storage.get('workbenchLanguage'),'zh');
 const zh=load('?lang=zh','en');zh.ui.apply();assert.equal(zh.ui.language,'zh');assert.equal(zh.title.firstChild.nodeValue,'报告信息');
 assert.equal(zh.ui.t('费用项 {0} {1}',3,'quantity'),'费用项 3 quantity');
+assert.equal(zh.ui.t('Element · 构件'),'构件');assert.equal(zh.ui.t('Save · 保存检查项'),'保存检查项');assert.equal(zh.ui.t('报告内容格式不正确或过长 / Invalid or oversized report content'),'报告内容格式不正确或过长');assert.equal(en.ui.t('报告内容格式不正确或过长 / Invalid or oversized report content'),'Invalid or oversized report content');
 en.ui.remember('zh');assert.equal(en.storage.get('workbenchLanguage'),'zh');en.ui.remember('invalid');assert.equal(en.storage.get('workbenchLanguage'),'zh');
 console.log('Language selection, static labels, dynamic server messages and user-content preservation passed.');

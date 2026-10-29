@@ -14,11 +14,17 @@
  });
  function t(source,...values){
   if(typeof source!=='string')return source??'';
-  if(language==='zh')return substitute(source,values);
+  if(language==='zh'){
+   const chinese=root.WorkbenchChinese||{};
+   if(Object.hasOwn(chinese,source))return substitute(chinese[source],values);
+   if(/[\u4e00-\u9fff]/.test(source)&&source.includes(' / ')&&/[A-Za-z]/.test(source.split(' / ').at(-1)))return substitute(source.split(' / ')[0],values);
+   return substitute(source,values);
+  }
   if(Object.hasOwn(translations,source))return substitute(translations[source],values);
   // Server messages contain interpolated names or page numbers. Match only
   // complete known messages, without touching report content or field values.
   for(const entry of patterns){const match=source.match(entry.regex);if(match){const args=[];entry.indices.forEach((index,n)=>args[index]=match[n+1]);return substitute(entry.value,args);}}
+  if(/[\u4e00-\u9fff]/.test(source)&&source.includes(' / ')&&/[A-Za-z]/.test(source.split(' / ').at(-1)))return substitute(source.split(' / ').at(-1),values);
   return substitute(source,values);
  }
  function apply(){

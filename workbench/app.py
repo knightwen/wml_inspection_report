@@ -14,6 +14,7 @@ from version import __version__
 from preview import PreviewManager,word_capability
 from ratings import DEFAULT_RATING_OPTIONS
 from inspection_items import blank_item, normalize_project, all_photos
+from content_blocks import content_photos, validate_sections
 from report_types import REPORT_TYPES, report_type, new_modules, calculation_photos, validate_calculation
 
 pillow_heif.register_heif_opener()
@@ -164,7 +165,7 @@ class Store:
         if template_id=='calculation':
             p['metadata']=dict.fromkeys(METADATA,'')
             p['modules']=new_modules()
-            p['cal_cover']={'title':'CALCULATION REPORT','introduction_title':'INTRODUCTION','materials_title':'MATERIAL PROPERTIES','introduction':'','materials':'','revisions':[]}
+            p['cal_cover']={'title':'CALCULATION REPORT','introduction_title':'','materials_title':'','introduction':'','materials':'','revisions':[], 'modules':[{'id':secrets.token_hex(16),'title':'','blocks':[]} for _ in range(2)]}
         atomic_json(self.path_for_project(p['id']),p);return p
 
     def validate(self,p):
@@ -188,6 +189,7 @@ class Store:
             validate_calculation(p,self.catalog)
             return
         date.fromisoformat(p['metadata']['report_date'])
+        validate_sections(p,self.catalog)
         itemids=set()
         for index,item in enumerate([*p['items'],p.get('editor',{})]):
             saved=index<len(p['items'])
@@ -357,6 +359,7 @@ class Store:
         with self.lock:
             p=deepcopy(p);self.validate(p)
             photoids={ph['id'] for item in [*p['items'],p['editor']] for ph in all_photos(item)}
+            photoids.update(ph['id'] for ph in content_photos(p))
             if report_type(p)=='calculation':photoids.update(ph['id'] for ph in calculation_photos(p))
             result=BytesIO()
             with zipfile.ZipFile(result,'w',zipfile.ZIP_DEFLATED) as z:
@@ -382,6 +385,7 @@ class Store:
                 prepared.append((new,{**ph,'id':new},original,converted))
             for item in [*p['items'],p['editor']]:
                 for ph in all_photos(item):ph['id']=mapping[ph['id']]
+            for ph in content_photos(p):ph['id']=mapping[ph['id']]
             if report_type(p)=='calculation':
                 for ph in calculation_photos(p):ph['id']=mapping[ph['id']]
             p['id']=secrets.token_hex(16);p['revision']=0;p['updated']=datetime.now().isoformat(timespec='seconds')
@@ -449,8 +453,8 @@ class Handler(BaseHTTPRequestHandler):
                 source=s.path/'library.xlsx'
                 if not source.exists():source=RESOURCES/'word_library.xlsx'
                 self.send_bytes(source.read_bytes(),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',filename='word-library.xlsx');return
-            if url.path=='/wml-logo.png':self.send_bytes((RESOURCES/'wml-logo.png').read_bytes(),'image/png');return
-            file={'/':'index.html','/app.js':'app.js','/calculation.js':'calculation.js','/draft-state.js':'draft-state.js','/interface.js':'interface.js','/i18n.js':'i18n.js','/translations-en.js':'translations-en.js','/style.css':'style.css','/favicon.svg':'favicon.svg'}.get(url.path)
+            if url.path in ['/wml-logo.png','/wml-logo-horizontal.png']:self.send_bytes((RESOURCES/url.path.lstrip('/')).read_bytes(),'image/png');return
+            file={'/':'index.html','/app.js':'app.js','/content-blocks.js':'content-blocks.js','/calculation.js':'calculation.js','/draft-state.js':'draft-state.js','/interface.js':'interface.js','/i18n.js':'i18n.js','/translations-en.js':'translations-en.js','/translations-zh.js':'translations-zh.js','/style.css':'style.css','/favicon.svg':'favicon.svg'}.get(url.path)
             if not file:self.reply({'error':'Not found'},404);return
             self.send_bytes((WEB/file).read_bytes(),mimetypes.guess_type(file)[0] or 'text/plain')
         except Exception as exc:

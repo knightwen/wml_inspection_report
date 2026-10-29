@@ -8,7 +8,9 @@
 
 Calculation Report 是报告编辑工具，工程计算在外部完成。新建时仅预加载 References、Design Criteria、Load Engineering（Load Cases / Load Combinations / Load Inputs）及 Analysis Results（Strength / Serviceability）的章节名称。项目资料、正文、表格、照片及人员选择均为空；公司 Logo 和页头版式固定。封面简介、材料说明和修订记录可以另行填写。
 
-封面编辑区默认展开，也可从章节导航中的“封面与报告标题”打开。报告标题、简介标题和正文、材料说明标题和正文以及修订记录均可修改，调整跟随当前草稿保存，并用于 Excel、Word、PDF 及模板样式预览。旧草稿未设置标题时沿用 `CALCULATION REPORT`。Excel 的 Logo 和报告标题放在工作表顶部，普通视图可见；打印时随顶部重复行显示。项目信息、正文表格和修订表均带明确的单元格边框。
+公共页头和报告工具栏由两种模板共用，长报告名称独立显示。人员字段排在报告信息末尾，文字库入口位于检查报告章节导航内。中文与英文模式分别显示对应的系统文案及评级选项，填写的报告内容和导出值不自动翻译。
+
+CAL 左侧树分为封面模块、修订记录和正文。新建封面模块的标题与内容留空，支持增删、排序及文字／表格／图片；页头自动生成，不另设编辑项。旧封面文字和自定义标题可继续使用。正文标题在顶部直接修改，“从新页开始”位于同一行，下面是一行操作工具栏。Excel 的 Logo 和报告标题在普通视图可见，打印时重复显示；项目信息、正文表格和修订表均有明确边框。
 
 - 章节支持增删、重命名、子章节、同级拖动排序、增加/减少缩进、上下移动和“从新页开始”。编号和目录随当前结构更新，最多六级。调整仅保存到当前草稿，新建报告仍使用默认空白结构。
 - 章节中可混排文字、可编辑表格和图片，通过上下按钮调整内容顺序。表格支持从 Excel 复制粘贴（含多行单元格）；粘贴的公式作为文字保存，不执行计算。图片支持批量上传、粘贴截图、旋转、宽度和图注。草稿备份包含所有模块、封面、照片和原图。
@@ -20,7 +22,9 @@ Calculation Report 是报告编辑工具，工程计算在外部完成。新建�
 
 ```powershell
 python workbench/test_calculation.py
+python workbench/test_content_blocks.py
 node tools/test_calculation_browser.cjs
+node tools/test_workspace_layout.cjs
 python tools/test_calculation_native.py
 ```
 
@@ -53,8 +57,8 @@ Windows 10/11 64 位便携程序：解压完整分发包，双击 `InspectionWor
 3. 填写 Element、Condition Rating、Likelihood、Severity 和 Priority。下拉菜单始终显示全部标准选项；选择“手动填写 / 补充描述”可输入自定义内容。标准等级由低到高：Likelihood 为 Unlikely / Possible / Likely；Severity 为 Negligible / Minor / Moderate / Severe；Priority 为 Low / Moderate / High / Urgent。既有草稿的历史选项保持不变。
 4. 搜索并选择 Observation / Recommendation，再按现场情况编辑。
 5. 点击 Save，将检查项保存到列表；支持重新编辑、删除，拖动序号旁的手柄调整顺序并自动保存，也可使用 ↑ / ↓。
-6. 在“报告章节”填写 Introduction、Recommended Remedial Works、Conclusion 和 Cost Estimate 说明，支持多段落、自动保存及手动保存。四个模块每行一个。费用说明填入原模板费用表上方；费用表支持增删行、Priority 下拉、Quantity × Rate 自动计算及总计，并写入 Word 原模板表格。数量或单价留空时仅显示已填写项小计。
-7. 点击 Generate，下载 Word 报告。当前编辑项必须先 Save；已填写的章节同时导出，空白章节保留模板。
+6. 左侧章节树按报告顺序显示项目介绍、外部建筑检查记录、修复工程建议、结论和费用估算说明。检查记录下列出父项与子项，右侧子项列表和编辑区放在同一容器。正文章节支持文字、图片和表格内容块、排序、从 Excel 粘贴表格及粘贴截图。旧草稿文字自动作为文字块显示，新增图片与原图纳入备份和 Word 导出。费用章节另外保留数量 × 单价计算表及总计，数量或单价留空时仅显示已填写项小计。
+7. 点击“生成 Word 报告”，下载报告。当前编辑项必须先“保存检查项”；已填写的章节同时导出，空白章节保留模板。
 
 顶部保存状态区分未保存、等待保存、正在保存、保存失败及保存冲突。连续编辑时，全部修改提交成功后才显示“已保存到本地”；存在待提交或失败内容时，关闭或刷新页面会提示。保存失败可点击“重试保存”。两个页面修改同一草稿发生冲突时，可另存副本继续，或保留副本后加载最新版本，也可下载包含当前修改和照片的 ZIP。
 

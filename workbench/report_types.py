@@ -1,6 +1,7 @@
 """Report-type registry and bounded, per-draft calculation report content."""
 import re
 import secrets
+from content_blocks import validate_blocks
 
 REPORT_TYPES = [
     {'id': 'inspection', 'name': 'Inspection Report', 'formats': ['docx']},
@@ -106,6 +107,14 @@ def validate_calculation(project, catalog):
         string(cover.get(key, ''), 60000)
     for key in ['title','introduction_title','materials_title']:
         if key in cover:string(cover[key],120)
+    if 'modules' in cover:
+        nodes = cover['modules']
+        if not isinstance(nodes, list) or len(nodes) > 100:raise ValueError('封面模块过多 / Too many cover modules')
+        for module in nodes:
+            if not isinstance(module, dict):raise ValueError('封面格式不正确 / Invalid cover')
+            identity(module.get('id'))
+            string(module.get('title'), 500)
+            validate_blocks(module.get('blocks'), catalog, seen)
     revisions = cover.get('revisions')
     if not isinstance(revisions, list) or len(revisions) > 100:
         raise ValueError('修订记录格式不正确 / Invalid revision history')

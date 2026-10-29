@@ -21,13 +21,23 @@ numbers are checked against the actual printed PDF. Word export contains the
 same editable report content; its pagination may differ. Update its contents
 field after opening in Word.
 
-The cover editor opens expanded and is also available through **Cover and report
-title** in the chapter navigation. Edit the report title, introduction and
-material headings/text, and revision history there. These changes are saved with
-the current draft and used in all output formats. The Excel logo and title now
-live in the worksheet header band, so they are visible in normal view and repeat
-with the print-title rows. Project information, content tables and revision
-history have explicit borders around each logical cell.
+The shared header and toolbar are independent of the report name, so long names
+do not squeeze the action buttons. Personnel fields come last. The inspection
+wording library is available within its chapter navigation. Chinese and English
+modes localize interface labels and rating choices without changing report data.
+
+The CAL tree groups cover modules, revision history and body chapters. New cover
+module headings and content are blank; add, remove or reorder modules using the
+same text/table/image editor as the body. The report header is automatic. Older
+cover text and custom headings remain supported. Edit chapter names inline; the
+page-break switch shares that row, followed by a single action toolbar.
+Worksheet branding is visible in normal Excel view and repeats in print.
+
+Inspection chapters follow report order in a left-hand tree, including nested
+inspection items and photo subitems. Narrative chapters accept ordered text,
+table and image blocks, with Excel cell paste and screenshot paste. Existing
+plain-text drafts load as text blocks. Chapter images and originals are included
+in backups and Word export. The cost chapter retains its calculated cost table.
 
 These additions are available in the source/development version and have not
 been published as a new portable release.

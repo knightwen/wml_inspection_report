@@ -29,7 +29,8 @@ class EnglishAssetsTest(unittest.TestCase):
             self.assertIn('lang="en-AU"', page)
             self.assertIn('Photo and wording subitems', page)
             self.assertIn('Add subitem', page)
-            self.assertIn('Photos in this subitem share the same wording', page)
+            self.assertNotIn('Photos in this subitem share the same wording', page)
+            self.assertIn('Report toolbar', page)
             self.assertIn('englishOnly: true', (web / 'interface.js').read_text())
             self.assertEqual(json.loads((resources / 'ui_config.json').read_text())['edition'], 'english')
             people = json.loads((resources / 'personnel.json').read_text())['people']

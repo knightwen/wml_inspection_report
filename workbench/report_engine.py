@@ -256,7 +256,11 @@ def metadata_values(meta):
     d=date.fromisoformat(values['report_date'])
     values['report_date_long']=f'{d.day} {d.strftime("%B")} {d.year}'
     values['report_date_short']=d.strftime('%d/%m/%Y')
-    values['cover_title']=f'STRUCTURAL ASSET INSPECTIONS AND REMEDIAL ADVICE - {values["site"]}'
+    site=values['site'].strip()
+    # Existing drafts may contain the complete report title in the site field.
+    # Compose the cover without adding that prefix again or changing saved input.
+    full_title=re.match(r'^STRUCTURAL\s+ASSET\s+INSPECTIONS\s+AND\s+REMEDIAL\s+ADVICE(?=\s*(?:[-–—:]|$))',site,re.IGNORECASE)
+    values['cover_title']=site if full_title else f'STRUCTURAL ASSET INSPECTIONS AND REMEDIAL ADVICE - {site}'
     values['document_name']=values.get('document_name') or f'{values["report_number"]}_REV{values.get("revision", "A")}-{values["client"]}-{values["site"]}'
     return values
 
@@ -344,6 +348,48 @@ def fill_cost_table(body, rows):
     for cell,text in zip(row.findall('w:tc',NS),['','TOTAL' if complete else 'SUBTOTAL (incomplete estimate)','','','',format(total,',.2f'),'']):set_text(cell,text)
     table.append(row)
 
+def fill_rich_sections(body, sections, parts, relations, photo_path):
+    labels={'introduction':'introduction','remedial_works':'recommended remedial works',
+            'conclusion':'conclusion','cost_estimate':'cost estimate'}
+    for key, blocks in sections.items():
+        heading=next(p for p in body.findall('w:p',NS)
+                     if ''.join(p.xpath('.//w:t/text()',namespaces=NS)).strip().casefold()==labels[key])
+        following=heading.getnext()
+        blank=following is not None and following.tag==q('p') and not following.xpath('.//w:t | .//w:drawing | ./w:pPr/w:sectPr',namespaces=NS)
+        prototype=deepcopy(following) if blank else paragraph()
+        index=body.index(heading)+1
+        if blank and blocks:body.remove(following)
+        nodes=[]
+        for block in blocks:
+            if block['type']=='text':
+                for line in block['text'].replace('\r\n','\n').replace('\r','\n').split('\n'):
+                    p=deepcopy(prototype);scrub_ids(p);set_text(p,line);nodes.append(p)
+            elif block['type']=='table':
+                table=E.Element(q('tbl'));pr=child(table,'tblPr')
+                child(pr,'tblW',w=9500,type='dxa')
+                borders=child(pr,'tblBorders')
+                for side in ['top','left','bottom','right','insideH','insideV']:child(borders,side,val='single',sz=4,color='D9D9D9')
+                child(pr,'tblLayout',type='fixed')
+                width=9500//len(block['rows'][0]);grid=child(table,'tblGrid')
+                for _ in block['rows'][0]:child(grid,'gridCol',w=width)
+                for ri,row in enumerate(block['rows']):
+                    tr=child(table,'tr')
+                    if ri==0:child(child(tr,'trPr'),'tblHeader')
+                    for value in row:
+                        tc=child(tr,'tc');pr=child(tc,'tcPr');child(pr,'tcW',w=width,type='dxa')
+                        if ri==0:child(pr,'shd',val='clear',fill='EAF0E6')
+                        for line in value.split('\n'):tc.append(paragraph(line,bold=ri==0))
+                nodes.extend([table,paragraph()])
+            else:
+                photo=block['photo'];media='media/section-'+block['id']+'.jpg'
+                rid='rIdSection'+block['id'];parts['word/'+media]=Path(photo_path(photo['id'])).read_bytes()
+                E.SubElement(relations,'{'+P+'}Relationship',Id=rid,Type=R+'/image',Target=media)
+                with Image.open(photo_path(photo['id'])) as image:size=image.size
+                nodes.append(image_paragraph(rid,size,20000+len(parts),photo.get('caption') or photo['name'],9500*block['width']//100))
+                if photo.get('caption'):nodes.append(paragraph(photo['caption']))
+        for node in nodes:body.insert(index,node);index+=1
+
+
 def generate_report(template, project, photo_path, target):
     with zipfile.ZipFile(template) as z: parts={n:z.read(n) for n in z.namelist()}
     values=metadata_values(project['metadata'])
@@ -360,11 +406,13 @@ def generate_report(template, project, photo_path, target):
                     t.text=re.sub(r'\{\{(\w+)\}\}',lambda m:values.get(m[1],''),t.text)
             parts[name]=xml(node)
     doc=E.fromstring(parts['word/document.xml']);body=doc.find('w:body',NS)
-    fill_report_sections(body,project.get('sections',{}))
+    rich=project.get('section_blocks',{})
+    fill_report_sections(body,{k:v for k,v in project.get('sections',{}).items() if k not in rich})
     fill_cost_table(body,project.get('cost_rows',[]))
+    relations=E.fromstring(parts['word/_rels/document.xml.rels'])
+    fill_rich_sections(body,rich,parts,relations,photo_path)
     slot=body.xpath('./w:tbl[w:tblPr/w:tblCaption/@w:val="InspectionItems"]',namespaces=NS)[0]
     prototype=deepcopy(slot); at=body.index(slot);body.remove(slot)
-    relations=E.fromstring(parts['word/_rels/document.xml.rels'])
     used_ids={r.get('Id') for r in relations}; nextid=1000; pictureid=10000
     for itemindex,item in enumerate(project['items'],1):
         table=deepcopy(prototype);rows=table.findall('w:tr',NS);base=deepcopy(rows[5]); table.remove(rows[5])

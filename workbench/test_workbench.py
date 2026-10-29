@@ -22,6 +22,33 @@ class WorkbenchTests(unittest.TestCase):
 
     def tearDown(self):self.store.previews.close();self.tmp.cleanup()
 
+    def test_cover_does_not_repeat_report_title_already_in_site(self):
+        title='STRUCTURAL ASSET INSPECTIONS AND REMEDIAL ADVICE'
+        self.project['items']=[self.item([self.store.upload(image_bytes(),'cover-title.jpg')])]
+        self.project['metadata'].update(project_number='12477',report_number='13484-S-CAL-001')
+        with zipfile.ZipFile(RESOURCES/'report_template.docx') as z:
+            template=E.fromstring(z.read('word/document.xml')).find('w:body',NS)[2]
+        for site,expected in [
+            ('1/19 DEMPSTER STREET',title+' - 1/19 DEMPSTER STREET'),
+            (title+' - 1/19 DEMPSTER STREET',title+' - 1/19 DEMPSTER STREET'),
+            ('  '+title+' - 1/19 DEMPSTER STREET  ',title+' - 1/19 DEMPSTER STREET'),
+            ('Structural Asset Inspections and Remedial Advice – Site A','Structural Asset Inspections and Remedial Advice – Site A'),
+            (title,title),
+            ('Structural Asset Inspections Workshop',title+' - Structural Asset Inspections Workshop'),
+        ]:
+            with self.subTest(site=site):
+                self.project['metadata']['site']=site
+                target=Path(self.tmp.name)/'cover-title.docx'
+                generate_report(RESOURCES/'report_template.docx',self.project,self.store.photo_path,target)
+                with zipfile.ZipFile(target) as z:
+                    cover=E.fromstring(z.read('word/document.xml')).find('w:body',NS)[2]
+                    self.assertEqual(''.join(cover.xpath('.//w:t/text()',namespaces=NS)),expected)
+                    self.assertEqual(E.tostring(cover.find('w:pPr',NS)),E.tostring(template.find('w:pPr',NS)))
+                    self.assertEqual(E.tostring(cover.find('w:r/w:rPr',NS)),E.tostring(template.find('w:r/w:rPr',NS)))
+                    core=E.fromstring(z.read('docProps/core.xml'))
+                    self.assertEqual(core.find('{http://purl.org/dc/elements/1.1/}title').text,expected)
+                self.assertEqual(self.project['metadata']['site'],site)
+
     def test_cover_combines_project_and_report_numbers_without_duplicate_prefix(self):
         self.project['items']=[self.item([self.store.upload(image_bytes(),'cover.jpg')])]
         self.project['metadata'].update(site='Cover QA',project_number='12477',document_name='Custom document name')
